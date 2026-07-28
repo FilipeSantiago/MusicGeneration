@@ -13,7 +13,8 @@ from symusic import (
     Track,
 )
 
-from .canonical_data import CanonicalDataset
+from ..core.canonical_data import CanonicalDataset
+from .canonical_loader import CanonicalPiece
 
 
 def piece_frames(dataset: CanonicalDataset, piece_id: str) -> dict[str, pl.DataFrame]:
@@ -33,8 +34,29 @@ def piece_frames(dataset: CanonicalDataset, piece_id: str) -> dict[str, pl.DataF
     }
 
 
+def piece_frames_from_canonical_piece(piece: CanonicalPiece) -> dict[str, pl.DataFrame]:
+    return {
+        "piece": pl.DataFrame([piece.piece]),
+        "tracks": piece.tracks,
+        "notes": piece.notes,
+        "tempos": piece.tempos,
+        "time_signatures": piece.time_signatures,
+        "key_signatures": piece.key_signatures,
+        "control_changes": piece.control_changes,
+        "pitch_bends": piece.pitch_bends,
+    }
+
+
 def canonical_piece_to_symusic(dataset: CanonicalDataset, piece_id: str):
     frames = piece_frames(dataset, piece_id)
+    return canonical_frames_to_symusic(frames)
+
+
+def canonical_piece_data_to_symusic(piece: CanonicalPiece):
+    return canonical_frames_to_symusic(piece_frames_from_canonical_piece(piece))
+
+
+def canonical_frames_to_symusic(frames: dict[str, pl.DataFrame]):
     piece = frames["piece"].row(0, named=True)
     score = Score(int(piece["ticks_per_quarter"]))
     track_map: dict[int, Track] = {}
@@ -97,6 +119,14 @@ def canonical_piece_to_symusic(dataset: CanonicalDataset, piece_id: str):
 
 def canonical_piece_to_muspy(dataset: CanonicalDataset, piece_id: str) -> muspy.Music:
     frames = piece_frames(dataset, piece_id)
+    return canonical_frames_to_muspy(frames)
+
+
+def canonical_piece_data_to_muspy(piece: CanonicalPiece) -> muspy.Music:
+    return canonical_frames_to_muspy(piece_frames_from_canonical_piece(piece))
+
+
+def canonical_frames_to_muspy(frames: dict[str, pl.DataFrame]) -> muspy.Music:
     piece = frames["piece"].row(0, named=True)
     music = muspy.Music(resolution=int(piece["ticks_per_quarter"]))
     for row in frames["tempos"].sort("time_tick").iter_rows(named=True):

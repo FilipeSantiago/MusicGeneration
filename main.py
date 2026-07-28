@@ -6,9 +6,9 @@ import logging
 import os
 from pathlib import Path
 
-from data_processing.music_representations.builder import BuildStatus
+from data_processing.music_representations.core.builder import BuildStatus
 from data_processing.music_representations.config import MusicRepresentationConfig
-from data_processing.music_representations.dataset_builder import MusicDatasetBuilder
+from data_processing.music_representations.core.dataset_builder import MusicDatasetBuilder
 from data_processing.music_representations.registry import REPRESENTATION_NAMES
 
 LOGGER = logging.getLogger(__name__)

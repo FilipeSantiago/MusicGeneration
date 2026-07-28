@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .builder import BuildResult, BuildStatus
-from .config import MusicRepresentationConfig
-from .registry import REPRESENTATION_NAMES, create_builder
+from ..config import MusicRepresentationConfig
+from ..registry import REPRESENTATION_NAMES, create_builder
 
 ALL_REPRESENTATIONS = list(REPRESENTATION_NAMES)
 

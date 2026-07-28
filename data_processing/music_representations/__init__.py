@@ -1,8 +1,7 @@
 """Music representation preprocessing package."""
 
-from .builder import BuildResult, BuildStatus, MusicRepresentationBuilder
+from .core import BuildResult, BuildStatus, MusicDatasetBuilder, MusicRepresentationBuilder
 from .config import MusicRepresentationConfig
-from .dataset_builder import MusicDatasetBuilder
 from .registry import REPRESENTATION_NAMES, create_builder
 
 __all__ = [

@@ -7,7 +7,7 @@ from typing import Any
 import polars as pl
 
 from .config import MusicRepresentationConfig
-from .io import list_output_files, utc_now_iso, write_json
+from .helpers.io import list_output_files, utc_now_iso, write_json
 
 
 def dependency_versions() -> dict[str, str]:

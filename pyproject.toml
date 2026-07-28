@@ -14,6 +14,7 @@ dependencies = [
     "pytest>=9.1.1",
     "ruff>=0.16.0",
     "symusic",
+    "tqdm>=4.69.1",
 ]
 
 [tool.mypy]

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from .base import BaseRepresentationBuilder
-from .builder import MusicRepresentationBuilder
-from .canonical import CanonicalBuilder
+from .core.base import BaseRepresentationBuilder
+from .core.builder import MusicRepresentationBuilder
 from .config import MusicRepresentationConfig
-from .miditok_builders import (
+from .representations import CanonicalBuilder, NoteTableBuilder, PianoRollBuilder
+from .representations.miditok import (
+    BPEBuilder,
     CPWordBuilder,
     MIDILikeBuilder,
     OctupleBuilder,
@@ -13,10 +14,9 @@ from .miditok_builders import (
     REMIPlusBuilder,
     StructuredBuilder,
     TSDBuilder,
+    UnigramBuilder,
+    WordPieceBuilder,
 )
-from .note_table import NoteTableBuilder
-from .piano_roll import PianoRollBuilder
-from .subword import BPEBuilder, UnigramBuilder, WordPieceBuilder
 
 type BuilderType = type[BaseRepresentationBuilder]
 

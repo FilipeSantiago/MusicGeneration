@@ -668,6 +668,7 @@ dependencies = [
     { name = "pytest" },
     { name = "ruff" },
     { name = "symusic" },
+    { name = "tqdm" },
 ]
 
 [package.metadata]
@@ -683,6 +684,7 @@ requires-dist = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.0" },
     { name = "symusic" },
+    { name = "tqdm", specifier = ">=4.69.1" },
 ]
 
 [[package]]

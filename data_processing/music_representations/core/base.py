@@ -5,9 +5,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from .builder import BuildResult, BuildStatus, MusicRepresentationBuilder
-from .canonical_loader import load_canonical_dataset
-from .config import MusicRepresentationConfig
-from .io import build_directory
+from ..config import MusicRepresentationConfig
+from ..helpers.canonical_loader import load_canonical_dataset
+from ..helpers.io import build_directory
 
 
 class BaseRepresentationBuilder(MusicRepresentationBuilder, ABC):

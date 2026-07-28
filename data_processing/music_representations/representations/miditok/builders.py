@@ -15,11 +15,18 @@ from miditok import (
     Structured,
     TokenizerConfig,
 )
+from tqdm.auto import tqdm
 
-from .adapters import canonical_piece_to_symusic
-from .base import BaseRepresentationBuilder
-from .manifest import write_manifest
-from .segmentation import build_segments
+from ...core.base import BaseRepresentationBuilder
+from ...fallback.miditok import build_miditok_fallback_sequence
+from ...helpers.adapters import canonical_piece_data_to_symusic
+from ...helpers.canonical_loader import (
+    iter_canonical_pieces,
+    load_canonical_manifest,
+    load_canonical_pieces,
+)
+from ...helpers.segmentation import build_piece_segments
+from ...manifest import write_manifest
 
 TOKENIZER_TYPES: dict[str, Callable[..., object]] = {
     "midilike": MIDILike,
@@ -88,46 +95,54 @@ class MidiTokRepresentationBuilder(BaseRepresentationBuilder):
         return tokenizer_cls(tokenizer_config)
 
     def _build_into(self, output_dir: Path) -> None:
-        dataset = self.load_canonical()
-        segments = build_segments(dataset.pieces, dataset.notes, self.config)
+        pieces = load_canonical_pieces(self.canonical_dir)
+        manifest = load_canonical_manifest(self.canonical_dir)
         tokenizer = self._tokenizer()
         tokens_dir = output_dir / "tokens"
         tokens_dir.mkdir(parents=True, exist_ok=True)
         mapping_rows: list[dict[str, object]] = []
-        for segment in segments.iter_rows(named=True):
-            piece_id = str(segment["piece_id"])
-            segment_id = segment["segment_id"] or f"{piece_id}_full"
-            score = canonical_piece_to_symusic(dataset, piece_id)
+        for piece_data in tqdm(
+            iter_canonical_pieces(self.canonical_dir),
+            total=pieces.height,
+            desc=self.representation_name,
+            unit="piece",
+            leave=False,
+        ):
+            score = canonical_piece_data_to_symusic(piece_data)
             seq = self._encode(tokenizer, score)
-            token_path = tokens_dir / f"{segment_id}.json"
-            token_path.write_text(
-                json.dumps({"ids": seq.ids, "tokens": seq.tokens}, indent=2),
-                encoding="utf-8",
-            )
-            mapping_rows.append(
-                {
-                    "piece_id": piece_id,
-                    "segment_id": segment["segment_id"],
-                    "maestro_split": segment["maestro_split"],
-                    "start_tick": segment["start_tick"],
-                    "end_tick": segment["end_tick"],
-                    "token_file": str(token_path.relative_to(output_dir)),
-                    "token_count": len(seq.ids),
-                }
-            )
-        pl.DataFrame(mapping_rows).write_parquet(output_dir / "segments.parquet")
+            for segment in build_piece_segments(
+                piece_data.piece, piece_data.notes, self.config
+            ):
+                piece_id = str(segment["piece_id"])
+                segment_id = segment["segment_id"] or f"{piece_id}_full"
+                token_path = tokens_dir / f"{segment_id}.json"
+                token_path.write_text(
+                    json.dumps({"ids": seq.ids, "tokens": seq.tokens}, indent=2),
+                    encoding="utf-8",
+                )
+                mapping_rows.append(
+                    {
+                        "piece_id": piece_id,
+                        "segment_id": segment["segment_id"],
+                        "maestro_split": segment["maestro_split"],
+                        "start_tick": segment["start_tick"],
+                        "end_tick": segment["end_tick"],
+                        "token_file": str(token_path.relative_to(output_dir)),
+                        "token_count": len(seq.ids),
+                    }
+                )
+        segments_df = pl.DataFrame(mapping_rows)
+        segments_df.write_parquet(output_dir / "segments.parquet")
         tokenizer.save(output_dir)
         write_manifest(
             output_dir,
             representation=self.representation_name,
             representation_schema_version=self.config.representation_schema_version,
-            source_canonical_schema_version=dataset.manifest[
-                "source_canonical_schema_version"
-            ],
-            source_dataset_fingerprint=dataset.manifest["source_dataset_fingerprint"],
+            source_canonical_schema_version=manifest["source_canonical_schema_version"],
+            source_dataset_fingerprint=manifest["source_dataset_fingerprint"],
             config=self.config,
-            pieces=dataset.pieces,
-            segments=segments,
+            pieces=pieces,
+            segments=segments_df,
             extra={
                 "tokenizer_class": tokenizer.__class__.__name__,
                 "special_tokens": tokenizer.config.special_tokens,
@@ -144,29 +159,7 @@ class MidiTokRepresentationBuilder(BaseRepresentationBuilder):
                 return seq[0]
             return seq
         except Exception:  # noqa: BLE001
-            return self._fallback_encode(score)
-
-    def _fallback_encode(self, score):
-        tokens: list[str] = []
-        current_time = 0
-        for track in score.tracks:
-            if self.representation_name in {"structured", "pertok"}:
-                tokens.append(f"Program_{track.program}")
-            for note in track.notes:
-                delta = note.time - current_time
-                tokens.extend(
-                    [
-                        f"TimeShift_{delta}",
-                        f"Pitch_{note.pitch}",
-                        f"Velocity_{note.velocity}",
-                        f"Duration_{note.duration}",
-                    ]
-                )
-                current_time = note.time
-        ids = list(range(len(tokens)))
-        from miditok.classes import TokSequence
-
-        return TokSequence(ids=ids, tokens=tokens)
+            return build_miditok_fallback_sequence(score, self.representation_name)
 
 
 class MIDILikeBuilder(MidiTokRepresentationBuilder):

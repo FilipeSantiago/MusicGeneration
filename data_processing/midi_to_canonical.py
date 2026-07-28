@@ -7,6 +7,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from symusic import Score
+from tqdm.auto import tqdm
 
 EVENT_SCHEMA = pa.schema(
     [
@@ -229,7 +230,10 @@ class MidiToCanonical:
         midi_files = self._iter_midi_files()
         manifest: list[dict] = []
 
-        for index, midi_path in enumerate(midi_files, start=1):
+        for index, midi_path in enumerate(
+            tqdm(midi_files, desc="midi_to_canonical", unit="midi", leave=False),
+            start=1,
+        ):
             relative_midi = midi_path.relative_to(self.midi_root)
             output_path = (output_root / relative_midi).with_suffix(".parquet")
             output_path.parent.mkdir(parents=True, exist_ok=True)
