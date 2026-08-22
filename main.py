@@ -114,13 +114,24 @@ def main() -> int:
         for result in results
         if result.status is BuildStatus.SKIPPED
     ]
+    locked = [
+        result.representation
+        for result in results
+        if result.status is BuildStatus.LOCKED
+    ]
     failed = [result for result in results if result.status is BuildStatus.FAILED]
     LOGGER.info(
-        "built=%s skipped=%s failed=%s",
+        "built=%s skipped=%s locked=%s failed=%s",
         built,
         skipped,
+        locked,
         [item.representation for item in failed],
     )
+    for result in results:
+        if result.status is BuildStatus.BUILT:
+            LOGGER.info("%s -> %s", result.representation, result.location)
+        elif result.status is BuildStatus.LOCKED:
+            LOGGER.info("%s skipped: %s", result.representation, result.message)
     if failed:
         for item in failed:
             LOGGER.error("%s: %s", item.representation, item.error)

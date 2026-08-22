@@ -11,6 +11,8 @@ class BuildStatus(str, Enum):
 
     BUILT = "built"
     SKIPPED = "skipped"
+    #: Another run holds the lease on this representation.
+    LOCKED = "locked"
     FAILED = "failed"
 
 
@@ -21,6 +23,8 @@ class BuildResult:
     representation: str
     status: BuildStatus
     output_dir: Path
+    #: Where the result actually lives: a local path, or an s3:// URI.
+    location: str = ""
     message: str = ""
     files: list[str] = field(default_factory=list)
     error: str | None = None

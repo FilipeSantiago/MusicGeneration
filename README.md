@@ -235,6 +235,7 @@ Important paths:
 - [`main.py`](./main.py): root runner for PyCharm or command-line use.
 - [`data_processing/music_representations/`](./data_processing/music_representations): preprocessing package.
 - [`.env`](./.env): default runtime configuration for `main.py`.
+- [`storage/`](storage): local and S3 storage backends.
 - [`tests/`](./tests): synthetic-fixture tests for the preprocessing layer.
 
 ## Running the Project
@@ -285,6 +286,8 @@ Example:
 MUSIC_REPR_OUTPUT_DIR=/home/you/data/maestro_preprocessed
 ```
 
+When S3 storage is enabled this directory becomes the staging and cache root instead of the final destination. See [Storage Backends](#storage-backends).
+
 ### Optional variables
 
 #### `MUSIC_REPR_REPRESENTATIONS`
@@ -296,6 +299,8 @@ If omitted, the runner defaults to:
 ```env
 MUSIC_REPR_REPRESENTATIONS=all
 ```
+
+This is also the default: if the variable is unset or empty, every representation is built. `canonical` is always built first, since the other 13 read it back.
 
 Examples:
 
@@ -368,6 +373,84 @@ Example:
 MUSIC_REPR_CONFIG=/home/you/research/MusicGeneration/configs/remi_experiment.json
 ```
 
+## Storage Backends
+
+Results go to the local filesystem by default. Set `AWS_BUCKET` and they go to S3 instead; no other switch is needed.
+
+```
+data_processing/music_representations/storage/
+├── base.py            # Storage interface + StorageError
+├── local_storage.py   # LocalStorage
+├── s3_storage.py      # S3Storage
+└── factory.py         # build_storage() picks the backend
+```
+
+`build_storage()` is the only place that chooses, so nothing else in the codebase branches on which backend is active.
+
+### How the S3 backend works
+
+Builders write with libraries that need real file paths (`pyarrow.parquet.ParquetWriter`, `numpy.savez_compressed`, MidiTok's `tokenizer.save`), so a build cannot stream straight to S3. `S3Storage` therefore wraps a `LocalStorage`: each representation is built into a local staging directory, uploaded once complete, and the local copy is then removed.
+
+Two consequences worth knowing:
+
+- **`manifest.json` is uploaded last** and acts as the completion marker. S3 has no atomic directory swap, so an interrupted upload reads as "not built" and is rebuilt on the next run rather than being mistaken for a finished result.
+- **`canonical/` is kept on disk** after upload, because every other representation reads it back. If it is missing locally, it is downloaded from S3 on demand. Set `MUSIC_REPR_KEEP_LOCAL=true` to keep every representation locally as well.
+
+### S3 variables
+
+#### `AWS_BUCKET`
+
+Target bucket. Leave it empty to keep writing to the local filesystem.
+
+#### `AWS_ACCESS_KEY` / `AWS_SECRET_ACCESS_KEY`
+
+Credentials. Note the name is `AWS_ACCESS_KEY`, not boto3's own `AWS_ACCESS_KEY_ID`, so they are passed to the client explicitly. Leave both empty to fall back to boto3's normal credential chain (instance role, `~/.aws/credentials`, ...).
+
+#### `AWS_REGION`
+
+Bucket region. Falls back to boto3's own resolution (`AWS_DEFAULT_REGION`, `~/.aws/config`) when empty.
+
+#### `AWS_ENDPOINT_URL`
+
+Optional. Point it at MinIO or LocalStack to test the S3 path without a real bucket.
+
+#### `MUSIC_REPR_S3_PREFIX`
+
+Optional key prefix. Defaults to the last path component of `MUSIC_REPR_OUTPUT_DIR`, so results land at `s3://$AWS_BUCKET/$MUSIC_REPR_S3_PREFIX/<representation>/`.
+
+#### `MUSIC_REPR_KEEP_LOCAL`
+
+Optional. `true` keeps the local copy of every representation after upload.
+
+### Concurrent runs
+
+Building all 14 representations over MAESTRO takes long enough that you may want several workers on it, or need to resume after a crash. Each representation is therefore leased before it is built.
+
+A run asks the backend for one of three states:
+
+| State | Meaning | What the run does |
+| --- | --- | --- |
+| `complete` | `manifest.json` is stored | `skipped` |
+| `in_progress` | a live lease is held | `locked` — moves on to the next representation |
+| `missing` | neither | claims the lease and builds |
+
+The lease is an object at `s3://$AWS_BUCKET/$MUSIC_REPR_S3_PREFIX/_locks/<representation>.json`, claimed with a conditional `PutObject` (`IfNoneMatch: *`) so two runs racing for the same representation cannot both win. It sits beside the representation rather than inside it, so it never shows up in `manifest.json`'s file list and is not deleted by an `--overwrite` rebuild. The local backend does the same thing with `O_EXCL` under `$MUSIC_REPR_OUTPUT_DIR/_locks/`.
+
+While a build runs, a background thread refreshes the lease. If the process is killed, the lease stops being refreshed and expires, and the next run reclaims it — so a hard kill costs you `MUSIC_REPR_LOCK_TTL` seconds, not a stuck representation.
+
+Two consequences worth knowing:
+
+- **`locked` is not a failure.** A worker that finds everything claimed exits 0 and logs `locked=[...]`. Run the workers again and they pick up whatever is left.
+- **A locked `canonical` blocks its dependents.** Every other representation reads `canonical` back, so if another run is midway through it, the rest are reported `locked` rather than attempted.
+
+#### `MUSIC_REPR_LOCK_TTL`
+
+Optional, default `900`. Seconds before an unrefreshed lease can be reclaimed. Raise it if your storage is slow enough that heartbeats might not land.
+
+#### `MUSIC_REPR_LOCK_DISABLED`
+
+Optional. `true` turns leasing off entirely. Only safe when you know exactly one run touches the destination.
+
 ## Example `.env`
 
 ```env
@@ -377,6 +460,17 @@ MUSIC_REPR_REPRESENTATIONS=all
 MUSIC_REPR_OVERWRITE=false
 MUSIC_REPR_LIMIT=
 MUSIC_REPR_CONFIG=
+
+# Leave AWS_BUCKET empty to write to the local filesystem.
+AWS_ACCESS_KEY=
+AWS_SECRET_ACCESS_KEY=
+AWS_BUCKET=
+AWS_REGION=us-east-1
+AWS_ENDPOINT_URL=
+MUSIC_REPR_S3_PREFIX=
+MUSIC_REPR_KEEP_LOCAL=false
+MUSIC_REPR_LOCK_TTL=900
+MUSIC_REPR_LOCK_DISABLED=false
 ```
 
 ## Reproducibility and Safety

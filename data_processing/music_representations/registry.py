@@ -3,6 +3,7 @@ from __future__ import annotations
 from .core.base import BaseRepresentationBuilder
 from .core.builder import MusicRepresentationBuilder
 from .config import MusicRepresentationConfig
+from storage import Storage
 from .representations import CanonicalBuilder, NoteTableBuilder, PianoRollBuilder
 from .representations.miditok import (
     BPEBuilder,
@@ -41,10 +42,12 @@ REPRESENTATION_NAMES = tuple(REPRESENTATION_BUILDERS)
 
 
 def create_builder(
-    name: str, config: MusicRepresentationConfig
+    name: str,
+    config: MusicRepresentationConfig,
+    storage: Storage | None = None,
 ) -> MusicRepresentationBuilder:
     try:
         builder_cls = REPRESENTATION_BUILDERS[name]
     except KeyError as exc:
         raise KeyError(f"Unknown representation: {name}") from exc
-    return builder_cls(config)
+    return builder_cls(config, storage)
