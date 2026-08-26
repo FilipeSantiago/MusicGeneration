@@ -160,8 +160,9 @@ It provides a flat, model-friendly table with fields such as:
 - split;
 - pitch;
 - velocity;
-- onset;
-- duration;
+- onset (in quarter notes);
+- delta onset (gap in quarter notes from the previous note of the same segment);
+- duration (in quarter notes);
 - track id;
 - program;
 - drum flag;
@@ -373,6 +374,18 @@ Example:
 MUSIC_REPR_CONFIG=/home/you/research/MusicGeneration/configs/remi_experiment.json
 ```
 
+#### `MUSIC_REPR_NOTE_TABLE_BIN`
+
+Optional grid size, in quarter notes, used to discretize the `note_table` representation.
+
+`duration_bin` and `delta_onset_bin` in `notes.parquet` are `round(value_in_quarters / bin)`. Defaults to `0.125` (a thirty-second note). The value is part of the configuration hash, so changing it triggers a rebuild.
+
+Example:
+
+```env
+MUSIC_REPR_NOTE_TABLE_BIN=0.125
+```
+
 ## Storage Backends
 
 Results go to the local filesystem by default. Set `AWS_BUCKET` and they go to S3 instead; no other switch is needed.
@@ -460,6 +473,7 @@ MUSIC_REPR_REPRESENTATIONS=all
 MUSIC_REPR_OVERWRITE=false
 MUSIC_REPR_LIMIT=
 MUSIC_REPR_CONFIG=
+MUSIC_REPR_NOTE_TABLE_BIN=0.125
 
 # Leave AWS_BUCKET empty to write to the local filesystem.
 AWS_ACCESS_KEY=

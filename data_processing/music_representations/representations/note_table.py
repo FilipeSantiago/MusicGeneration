@@ -21,6 +21,7 @@ class NoteTableBuilder(BaseRepresentationBuilder):
     representation_name = "note_table"
 
     def _build_into(self, output_dir):
+        bin_size = self.config.note_table.bin_size
         pieces = load_canonical_pieces(self.canonical_dir)
         manifest = load_canonical_manifest(self.canonical_dir)
         segment_rows: list[dict[str, object]] = []
@@ -58,22 +59,47 @@ class NoteTableBuilder(BaseRepresentationBuilder):
                     notes = notes.with_columns(
                         pl.lit(None, dtype=pl.String).alias("segment_id")
                     )
-                note_table = notes.select(
-                    [
-                        "piece_id",
-                        "segment_id",
-                        "maestro_split",
-                        pl.col("pitch"),
-                        pl.col("velocity"),
-                        pl.col("onset_tick").alias("onset"),
-                        pl.col("duration_tick").alias("duration"),
-                        "track_id",
-                        "program",
-                        "is_drum",
-                        "track_name",
-                    ]
+                note_table = (
+                    notes.select(
+                        [
+                            "piece_id",
+                            "segment_id",
+                            "maestro_split",
+                            pl.col("pitch"),
+                            pl.col("velocity"),
+                            pl.col("onset_quarter").alias("onset"),
+                            pl.col("duration_quarter").alias("duration"),
+                            "track_id",
+                            "program",
+                            "is_drum",
+                            "track_name",
+                        ]
+                    )
+                    .sort(["piece_id", "segment_id", "onset"])
+                    .with_columns(
+                        pl.col("onset")
+                        .diff()
+                        .over(["piece_id", "segment_id"])
+                        .fill_null(0.0)
+                        .alias("delta_onset")
+                    )
+                    .with_columns(
+                        (pl.col("duration") / bin_size)
+                        .round(0)
+                        .cast(pl.Int32)
+                        .alias("duration_bin"),
+                        (pl.col("delta_onset") / bin_size)
+                        .round(0)
+                        .cast(pl.Int32)
+                        .alias("delta_onset_bin"),
+                    )
+                    .drop(["duration", "delta_onset"])
                 )
-                writer.write_table(note_table.to_arrow().cast(NOTE_TABLE_SCHEMA))
+                writer.write_table(
+                    note_table.to_arrow()
+                    .select(NOTE_TABLE_SCHEMA.names)
+                    .cast(NOTE_TABLE_SCHEMA)
+                )
         finally:
             writer.close()
         segments_df = pl.DataFrame(segment_rows) if segment_rows else pl.DataFrame(schema=SEGMENTS_SCHEMA)
@@ -86,7 +112,10 @@ class NoteTableBuilder(BaseRepresentationBuilder):
             config=self.config,
             pieces=pieces,
             segments=segments_df,
-            extra={"time_unit": self.config.note_table.time_unit},
+            extra={
+                "time_unit": self.config.note_table.time_unit,
+                "bin_size": bin_size,
+            },
         )
 
 
@@ -97,8 +126,9 @@ NOTE_TABLE_SCHEMA = pa.schema(
         ("maestro_split", pa.string()),
         ("pitch", pa.uint8()),
         ("velocity", pa.uint8()),
-        ("onset", pa.int64()),
-        ("duration", pa.int64()),
+        ("onset", pa.float64()),
+        ("delta_onset_bin", pa.int32()),
+        ("duration_bin", pa.int32()),
         ("track_id", pa.int16()),
         ("program", pa.int16()),
         ("is_drum", pa.bool_()),

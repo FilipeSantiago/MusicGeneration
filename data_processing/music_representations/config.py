@@ -1,10 +1,24 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+
+NOTE_TABLE_BIN_ENV = "MUSIC_REPR_NOTE_TABLE_BIN"
+DEFAULT_NOTE_TABLE_BIN = 0.125
+
+
+def _default_note_table_bin() -> float:
+    raw = os.environ.get(NOTE_TABLE_BIN_ENV, "").strip()
+    if not raw:
+        return DEFAULT_NOTE_TABLE_BIN
+    value = float(raw)
+    if value <= 0:
+        raise ValueError(f"{NOTE_TABLE_BIN_ENV} must be > 0, got {value}")
+    return value
 
 
 @dataclass(slots=True)
@@ -18,7 +32,8 @@ class SegmentationConfig:
 
 @dataclass(slots=True)
 class NoteTableConfig:
-    time_unit: str = "tick"
+    time_unit: str = "quarter"
+    bin_size: float = field(default_factory=_default_note_table_bin)
 
 
 @dataclass(slots=True)

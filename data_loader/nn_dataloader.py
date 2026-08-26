@@ -10,7 +10,7 @@ class NNDataloader(BaseDataloader):
     def __init__(self):
         super().__init__()
 
-    def loader(self, batch_size=32) -> DataLoader:
+    def loader(self, batch_size=32, load_music=None, num_workers=2, prefetch_factor=2) -> DataLoader:
         dataset = MusicDataset(self.train_df, self.representation_root, self.load_music)
 
         loader = DataLoader(
@@ -18,6 +18,8 @@ class NNDataloader(BaseDataloader):
             batch_size=batch_size,
             shuffle=True,
             collate_fn=self.neural_collate,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor
         )
         return loader
 
