@@ -4,10 +4,12 @@ version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
     "boto3>=1.43.78",
+    "ipykernel>=7.3.0",
     "miditok>=3.0.6.post1",
     "muspy>=0.5.0",
     "mypy>=2.3.0",
     "pandas>=3.0.5",
+    "pandas-stubs~=3.0.5",
     "polars>=1.43.0",
     "pretty-midi>=0.2.11",
     "pyarrow",
@@ -15,6 +17,7 @@ dependencies = [
     "pytest>=9.1.1",
     "ruff>=0.16.0",
     "symusic",
+    "torch>=2.13.0",
     "tqdm>=4.69.1",
 ]
 

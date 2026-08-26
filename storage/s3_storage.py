@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from functools import cache as memoize
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,40 @@ def _error_code(exc: BaseException) -> str:
     return str(response.get("Error", {}).get("Code", ""))
 
 
+def _clean(env: Mapping[str, str], name: str) -> str:
+    return (env.get(name) or "").strip()
+
+
+def _default_cache_root(env: Mapping[str, str]) -> Path:
+    raw = _clean(env, "MUSIC_REPR_OUTPUT_DIR")
+    return Path(raw) if raw else Path(".music_repr_cache")
+
+
+def _default_prefix(env: Mapping[str, str], cache: LocalStorage) -> str:
+    configured = _clean(env, "MUSIC_REPR_S3_PREFIX").strip("/")
+    if configured:
+        return configured
+    output_dir = _clean(env, "MUSIC_REPR_OUTPUT_DIR")
+    if output_dir:
+        return Path(output_dir).name
+    if cache.root.name:
+        return cache.root.name
+    return "music-representations"
+
+
+def _build_client(env: Mapping[str, str]) -> Any:
+    import boto3
+
+    access_key = _clean(env, "AWS_ACCESS_KEY")
+    secret_key = _clean(env, "AWS_SECRET_ACCESS_KEY")
+    session = boto3.session.Session(
+        aws_access_key_id=access_key or None,
+        aws_secret_access_key=secret_key or None,
+        region_name=_clean(env, "AWS_REGION") or None,
+    )
+    return session.client("s3", endpoint_url=_clean(env, "AWS_ENDPOINT_URL") or None)
+
+
 class S3Storage(Storage):
     """S3 backend that stages builds through a local :class:`LocalStorage` cache.
 
@@ -48,17 +83,25 @@ class S3Storage(Storage):
     def __init__(
         self,
         *,
-        bucket: str,
-        prefix: str,
-        cache: LocalStorage,
-        client: Any,
+        bucket: str | None = None,
+        prefix: str | None = None,
+        cache: LocalStorage | None = None,
+        client: Any | None = None,
         keep_local: bool = False,
         cache_exempt: Iterable[str] = (),
+        env: Mapping[str, str] | None = None,
         **kwargs,
     ):
+        env = os.environ if env is None else env
+        bucket = bucket.strip() if bucket is not None else _clean(env, "AWS_BUCKET")
+        if not bucket:
+            raise ValueError("S3Storage requires bucket=... or AWS_BUCKET")
+        cache = cache if cache is not None else LocalStorage(_default_cache_root(env), **kwargs)
+        prefix = prefix.strip("/") if prefix is not None else _default_prefix(env, cache)
+        client = client if client is not None else _build_client(env)
         super().__init__(**kwargs)
         self.bucket = bucket
-        self.prefix = prefix.strip("/")
+        self.prefix = prefix
         self.keep_local = keep_local
         self._cache = cache
         self._client = client
@@ -89,6 +132,19 @@ class S3Storage(Storage):
         if not local_dir.is_dir():
             self._download(name, local_dir)
         return local_dir
+
+    def download_key(self, key: str, destination: str | Path) -> Path:
+        """Download one exact S3 key to ``destination`` and return the local path."""
+        path = Path(destination)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._call(
+            self._client.download_file,
+            f"download {key}",
+            self.bucket,
+            key,
+            str(path),
+        )
+        return path
 
     # -- backend primitives --------------------------------------------------
 

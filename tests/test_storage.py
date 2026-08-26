@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import threading
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -85,6 +87,8 @@ class FakeS3Client:
         self.upload_log.append(key)
 
     def download_file(self, bucket: str, key: str, filename: str) -> None:
+        if key not in self.objects:
+            raise FakeClientError("NoSuchKey")
         Path(filename).write_bytes(self.objects[key])
 
     def list_objects_v2(self, **kwargs) -> dict:
@@ -356,6 +360,78 @@ def test_s3_storage_materialize_rejects_an_empty_prefix(s3) -> None:
     storage, _ = s3
     with pytest.raises(StorageError, match="Nothing stored"):
         storage.materialize("remi")
+
+
+def test_s3_storage_download_key_fetches_one_exact_key(s3, tmp_path: Path) -> None:
+    storage, client = s3
+    client.objects["processed/remi/tokens.json"] = b'{"tokens":[1,2,3]}'
+
+    destination = tmp_path / "downloads" / "tokens.json"
+    downloaded = storage.download_key("processed/remi/tokens.json", destination)
+
+    assert downloaded == destination
+    assert destination.read_bytes() == b'{"tokens":[1,2,3]}'
+
+
+def test_s3_storage_download_key_wraps_missing_keys(s3, tmp_path: Path) -> None:
+    storage, _ = s3
+
+    with pytest.raises(StorageError, match="Failed to download processed/missing.json"):
+        storage.download_key("processed/missing.json", tmp_path / "missing.json")
+
+
+def test_s3_storage_can_default_from_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = FakeS3Client()
+    calls: list[dict[str, object]] = []
+
+    class FakeSession:
+        def __init__(
+            self,
+            *,
+            aws_access_key_id: str | None,
+            aws_secret_access_key: str | None,
+            region_name: str | None,
+        ) -> None:
+            calls.append(
+                {
+                    "aws_access_key_id": aws_access_key_id,
+                    "aws_secret_access_key": aws_secret_access_key,
+                    "region_name": region_name,
+                }
+            )
+
+        def client(self, service_name: str, endpoint_url: str | None = None):
+            calls.append(
+                {"service_name": service_name, "endpoint_url": endpoint_url}
+            )
+            return client
+
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(session=SimpleNamespace(Session=FakeSession)))
+    storage = S3Storage(
+        env={
+            "AWS_BUCKET": "env-bucket",
+            "AWS_ACCESS_KEY": "access",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_REGION": "us-east-1",
+            "AWS_ENDPOINT_URL": "http://localhost:9000",
+            "MUSIC_REPR_OUTPUT_DIR": str(tmp_path / "cache"),
+        }
+    )
+
+    assert storage.bucket == "env-bucket"
+    assert storage.prefix == "cache"
+    assert storage._cache.root == tmp_path / "cache"
+    assert storage._client is client
+    assert calls == [
+        {
+            "aws_access_key_id": "access",
+            "aws_secret_access_key": "secret",
+            "region_name": "us-east-1",
+        },
+        {"service_name": "s3", "endpoint_url": "http://localhost:9000"},
+    ]
 
 
 def test_s3_storage_wraps_client_errors(s3) -> None:
