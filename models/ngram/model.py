@@ -11,7 +11,44 @@ class Model:
         self.n = n
         self.models = []
 
-    def train(self):
+    def remi_train(self):
+        x = n = self.n
+
+        BOS = -1
+        EOF = -1000
+
+        while 2 <= x <= n:
+            model = defaultdict(Counter)  # noqa: F821
+            for batch in self.loader:
+                for song in batch:
+                    note_tokens = song['tokens']
+                    note_tokens = [BOS] * (x - 1) + note_tokens + [EOF]
+                    for i in range(len(note_tokens) - x + 1):
+                        context = tuple(note_tokens[i : i + x - 1])
+                        target = note_tokens[i + x - 1]
+                        model[context][target] += 1
+
+            self.models.append(model)
+            x -= 1
+    
+    def remi_predict(self, tokens):
+        next_token = None
+        x = self.n
+
+        while x > 1:
+            use_tokens = tokens[(x - 1) * -1 :]
+            model = self.models[self.n - x]
+            next_token_candidates = model[use_tokens]
+
+            if sum(next_token_candidates.values()) < 10:
+                x -= 1
+            else:
+                return random.choices(list(next_token_candidates.keys()), next_token_candidates.values())
+
+        return next_token
+
+    
+    def note_table_train(self):
         x = n = self.n
 
         BOS = ("<BOS>", "<BOS>", "<BOS>", "<BOS>")
@@ -34,7 +71,7 @@ class Model:
             self.models.append(model)
             x -= 1
 
-    def predict(self, tokens):
+    def note_table_predict(self, tokens):
         next_token = None
         x = self.n
 

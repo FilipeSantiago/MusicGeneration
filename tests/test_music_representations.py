@@ -7,8 +7,11 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from data_processing.music_representations.config import MusicRepresentationConfig
 from data_processing.music_representations.core.builder import BuildStatus
-from data_processing.music_representations.core.dataset_builder import MusicDatasetBuilder
+from data_processing.music_representations.core.dataset_builder import (
+    MusicDatasetBuilder,
+)
 from data_processing.music_representations.helpers.adapters import (
     canonical_piece_to_muspy,
     canonical_piece_to_symusic,
@@ -17,12 +20,13 @@ from data_processing.music_representations.helpers.canonical_loader import (
     load_canonical_dataset,
 )
 from data_processing.music_representations.helpers.segmentation import build_segments
-from data_processing.music_representations.config import MusicRepresentationConfig
 from data_processing.music_representations.registry import (
     REPRESENTATION_NAMES,
     create_builder,
 )
-from data_processing.music_representations.representations.canonical import CanonicalBuilder
+from data_processing.music_representations.representations.canonical import (
+    CanonicalBuilder,
+)
 
 
 def _build_canonical(config: MusicRepresentationConfig) -> Path:

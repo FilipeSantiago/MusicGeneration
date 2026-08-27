@@ -26,6 +26,8 @@ class BaseDataloader(ABC):
         self.representation_root = None
         self.train_df = None
         self.note_groups = None
+        self.config = None
+        self.storage = None
 
     def prepare_dataset(self, representation):
         output_dir = Path(os.environ.get("MUSIC_REPR_OUTPUT_DIR"))
@@ -34,6 +36,10 @@ class BaseDataloader(ABC):
             output_dir=output_dir,
         )
         storage = build_storage(config)
+        # Kept so callers can decode with the same configuration the tokens were
+        # built with (bin_size, velocity_bin_size, ...) instead of retyping it.
+        self.config = config
+        self.storage = storage
         self.representation_root = storage.materialize(representation)
         
         if representation in ["note_table"]:
@@ -69,7 +75,7 @@ class BaseDataloader(ABC):
             notes = grouped["segment_id"].get_group(segment_id)
 
         notes = notes.sort_values("onset")
-        notes["velocity_bin"] = notes["velocity"] // 8
+        notes["velocity_bin"] = notes["velocity"] // self.config.note_table.velocity_bin_size
 
         return {
             "piece_id": row["piece_id"],
