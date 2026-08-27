@@ -97,3 +97,17 @@ PITCH_BENDS_SCHEMA = pa.schema(
         ("value", pa.int32()),
     ]
 )
+
+
+TABLE_SCHEMAS: dict[str, pa.Schema] = {
+    "pieces": PIECES_SCHEMA,
+    "tracks": TRACKS_SCHEMA,
+    "notes": NOTES_SCHEMA,
+    "tempos": TEMPOS_SCHEMA,
+    "time_signatures": TIME_SIGNATURES_SCHEMA,
+    "key_signatures": KEY_SIGNATURES_SCHEMA,
+    "control_changes": CONTROL_CHANGES_SCHEMA,
+    "pitch_bends": PITCH_BENDS_SCHEMA,
+}
+
+TABLE_NAMES = tuple(TABLE_SCHEMAS)

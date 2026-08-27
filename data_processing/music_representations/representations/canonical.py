@@ -4,15 +4,15 @@ import csv
 import hashlib
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import polars as pl
-import pyarrow as pa
 import pyarrow.parquet as pq
 from symusic import Score
 from tqdm.auto import tqdm
 
 from ..core.base import BaseRepresentationBuilder
+from ..helpers.canonical_frames import symusic_to_canonical_frames
 from ..manifest import write_manifest
 from ..schemas import (
     CONTROL_CHANGES_SCHEMA,
@@ -20,10 +20,14 @@ from ..schemas import (
     NOTES_SCHEMA,
     PIECES_SCHEMA,
     PITCH_BENDS_SCHEMA,
+    TABLE_SCHEMAS,
     TEMPOS_SCHEMA,
     TIME_SIGNATURES_SCHEMA,
     TRACKS_SCHEMA,
 )
+
+# Canonical frames key the single-row pieces table as "piece" (see helpers.adapters).
+FRAME_KEYS = {name: "piece" if name == "pieces" else name for name in TABLE_SCHEMAS}
 
 
 class CanonicalBuilder(BaseRepresentationBuilder):
@@ -61,14 +65,6 @@ class CanonicalBuilder(BaseRepresentationBuilder):
         if self.config.limit is not None:
             files = files[: self.config.limit]
         return files
-
-    @staticmethod
-    def _pair_events(tick_events, second_events, label: str):
-        if len(tick_events) != len(second_events):
-            raise ValueError(
-                f"{label}: event count mismatch: {len(tick_events)} != {len(second_events)}"
-            )
-        return zip(tick_events, second_events, strict=True)
 
     def _build_into(self, output_dir: Path) -> None:
         metadata = self._metadata_index()
@@ -130,9 +126,10 @@ class CanonicalBuilder(BaseRepresentationBuilder):
                 unit="midi",
                 leave=False,
             ):
-                piece_rows = self._build_piece_rows(midi_path, metadata)
-                for table_name, rows in piece_rows.items():
-                    self._write_rows(writers[table_name], rows, TABLE_SCHEMAS[table_name])
+                frames = self._build_piece_frames(midi_path, metadata)
+                for table_name, writer in writers.items():
+                    table = frames[FRAME_KEYS[table_name]].to_arrow()
+                    writer.write_table(table.cast(TABLE_SCHEMAS[table_name]))
 
         pieces_df = pl.read_parquet(output_dir / "pieces.parquet")
         write_manifest(
@@ -145,151 +142,33 @@ class CanonicalBuilder(BaseRepresentationBuilder):
             pieces=pieces_df,
             segments=None,
             extra={
-                "known_information_loss": [
+                "known_information_loss_extra": [
                     "lyrics and markers are not persisted in the canonical tables"
                 ]
             },
         )
 
-    @staticmethod
-    def _write_rows(writer: pq.ParquetWriter, rows: list[dict], schema: pa.Schema) -> None:
-        table = pa.Table.from_pylist(rows, schema=schema)
-        writer.write_table(table)
-
-    def _build_piece_rows(
+    def _build_piece_frames(
         self, midi_path: Path, metadata: dict[str, dict[str, str]]
-    ) -> dict[str, list[dict]]:
+    ) -> dict[str, pl.DataFrame]:
         relative_midi = midi_path.relative_to(self.config.input_dir)
         source_key = relative_midi.as_posix()
         meta = metadata.get(source_key, {})
         split = meta.get(
             "split", relative_midi.parts[0] if relative_midi.parts else "unknown"
         )
-        source_hash = hashlib.sha256(midi_path.read_bytes()).hexdigest()
-        piece_id = hashlib.sha256(source_key.encode("utf-8")).hexdigest()[:16]
-
-        score_tick = Score(midi_path)
-        score_sec = score_tick.to("second")
-        tpq = int(score_tick.ticks_per_quarter)
-        rows: dict[str, list[dict]] = {
-            "pieces": [
-                {
-                    "piece_id": piece_id,
-                    "source_midi": source_key,
-                    "source_sha256": source_hash,
-                    "composer": meta.get("canonical_composer") or meta.get("composer"),
-                    "title": meta.get("title"),
-                    "maestro_split": split,
-                    "ticks_per_quarter": tpq,
-                    "end_tick": int(score_tick.end()),
-                    "duration_sec": float(score_sec.end()),
-                    "schema_version": self.config.schema_version,
-                }
-            ],
-            "tracks": [],
-            "notes": [],
-            "tempos": [],
-            "time_signatures": [],
-            "key_signatures": [],
-            "control_changes": [],
-            "pitch_bends": [],
-        }
-
-        for track_id, (track_tick, track_sec) in enumerate(
-            zip(score_tick.tracks, score_sec.tracks, strict=True)
-        ):
-            rows["tracks"].append(
-                {
-                    "piece_id": piece_id,
-                    "track_id": track_id,
-                    "track_name": track_tick.name,
-                    "program": track_tick.program,
-                    "is_drum": track_tick.is_drum,
-                }
-            )
-            for note_id, (tick, sec) in enumerate(
-                self._pair_events(track_tick.notes, track_sec.notes, "notes")
-            ):
-                rows["notes"].append(
-                    {
-                        "piece_id": piece_id,
-                        "track_id": track_id,
-                        "note_id": note_id,
-                        "onset_tick": tick.time,
-                        "duration_tick": tick.duration,
-                        "onset_quarter": tick.time / tpq,
-                        "duration_quarter": tick.duration / tpq,
-                        "onset_sec": sec.time,
-                        "duration_sec": sec.duration,
-                        "pitch": tick.pitch,
-                        "velocity": tick.velocity,
-                    }
-                )
-            for tick, sec in self._pair_events(
-                track_tick.controls, track_sec.controls, "control changes"
-            ):
-                rows["control_changes"].append(
-                    {
-                        "piece_id": piece_id,
-                        "track_id": track_id,
-                        "time_tick": tick.time,
-                        "time_quarter": tick.time / tpq,
-                        "time_sec": sec.time,
-                        "number": tick.number,
-                        "value": tick.value,
-                    }
-                )
-            for tick, sec in self._pair_events(
-                track_tick.pitch_bends, track_sec.pitch_bends, "pitch bends"
-            ):
-                rows["pitch_bends"].append(
-                    {
-                        "piece_id": piece_id,
-                        "track_id": track_id,
-                        "time_tick": tick.time,
-                        "time_quarter": tick.time / tpq,
-                        "time_sec": sec.time,
-                        "value": tick.value,
-                    }
-                )
-
-        for tick, sec in self._pair_events(score_tick.tempos, score_sec.tempos, "tempos"):
-            rows["tempos"].append(
-                {
-                    "piece_id": piece_id,
-                    "time_tick": tick.time,
-                    "time_quarter": tick.time / tpq,
-                    "time_sec": sec.time,
-                    "qpm": tick.qpm,
-                }
-            )
-        for tick, sec in self._pair_events(
-            score_tick.time_signatures, score_sec.time_signatures, "time signatures"
-        ):
-            rows["time_signatures"].append(
-                {
-                    "piece_id": piece_id,
-                    "time_tick": tick.time,
-                    "time_quarter": tick.time / tpq,
-                    "time_sec": sec.time,
-                    "numerator": tick.numerator,
-                    "denominator": tick.denominator,
-                }
-            )
-        for tick, sec in self._pair_events(
-            score_tick.key_signatures, score_sec.key_signatures, "key signatures"
-        ):
-            rows["key_signatures"].append(
-                {
-                    "piece_id": piece_id,
-                    "time_tick": tick.time,
-                    "time_quarter": tick.time / tpq,
-                    "time_sec": sec.time,
-                    "key": tick.key,
-                    "tonality": tick.tonality,
-                }
-            )
-        return rows
+        return symusic_to_canonical_frames(
+            Score(midi_path),
+            piece_id=hashlib.sha256(source_key.encode("utf-8")).hexdigest()[:16],
+            metadata={
+                "source_midi": source_key,
+                "source_sha256": hashlib.sha256(midi_path.read_bytes()).hexdigest(),
+                "composer": meta.get("canonical_composer") or meta.get("composer"),
+                "title": meta.get("title"),
+                "maestro_split": split,
+                "schema_version": self.config.schema_version,
+            },
+        )
 
     @staticmethod
     def _dataset_fingerprint(pieces: pl.DataFrame) -> str:
@@ -298,13 +177,3 @@ class CanonicalBuilder(BaseRepresentationBuilder):
             for row in pieces.sort("piece_id").iter_rows(named=True)
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-TABLE_SCHEMAS: dict[str, pa.Schema] = {
-    "pieces": PIECES_SCHEMA,
-    "tracks": TRACKS_SCHEMA,
-    "notes": NOTES_SCHEMA,
-    "tempos": TEMPOS_SCHEMA,
-    "time_signatures": TIME_SIGNATURES_SCHEMA,
-    "key_signatures": KEY_SIGNATURES_SCHEMA,
-    "control_changes": CONTROL_CHANGES_SCHEMA,
-    "pitch_bends": PITCH_BENDS_SCHEMA,
-}

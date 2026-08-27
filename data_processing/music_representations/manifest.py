@@ -7,6 +7,7 @@ from typing import Any
 import polars as pl
 
 from .config import MusicRepresentationConfig
+from .contracts import contract_for
 from .helpers.io import list_output_files, utc_now_iso, write_json
 
 
@@ -47,6 +48,9 @@ def write_manifest(
     segments: pl.DataFrame | None,
     extra: dict[str, Any] | None = None,
 ) -> Path:
+    # The round-trip contract is the single source of truth for what this
+    # representation drops: the decoder tests assert against the same object.
+    contract = contract_for(representation, config)
     payload: dict[str, Any] = {
         "representation": representation,
         "representation_schema_version": representation_schema_version,
@@ -59,9 +63,14 @@ def write_manifest(
         "segments_per_split": split_counts(segments) if segments is not None else {},
         "output_files": list_output_files(output_dir),
         "configuration_hash": config.config_hash(),
-        "known_information_loss": [],
+        "known_information_loss": contract.describe_loss(),
+        "round_trip_contract": contract.to_dict(),
     }
     if extra:
+        extra = dict(extra)
+        payload["known_information_loss"].extend(
+            extra.pop("known_information_loss_extra", [])
+        )
         payload.update(extra)
     manifest_path = output_dir / "manifest.json"
     write_json(manifest_path, payload)

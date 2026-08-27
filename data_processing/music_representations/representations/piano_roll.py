@@ -126,8 +126,5 @@ class PianoRollBuilder(BaseRepresentationBuilder):
                     },
                     "resolution_frames_per_quarter": self.config.piano_roll.resolution,
                 },
-                "known_information_loss": [
-                    "tempo changes, non-sustain control changes, and pitch bends are stored only in canonical source tables"
-                ],
             },
         )

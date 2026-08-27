@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import polars as pl
-from miditok import TokenizerConfig
 from tqdm.auto import tqdm
 
 from ...core.base import BaseRepresentationBuilder
@@ -16,7 +15,7 @@ from ...helpers.canonical_loader import (
 )
 from ...helpers.segmentation import build_piece_segments
 from ...manifest import write_manifest
-from .builders import TOKENIZER_TYPES
+from .builders import build_tokenizer
 
 
 class SubwordBuilder(BaseRepresentationBuilder):
@@ -29,8 +28,10 @@ class SubwordBuilder(BaseRepresentationBuilder):
         pieces = load_canonical_pieces(self.canonical_dir)
         manifest = load_canonical_manifest(self.canonical_dir)
         base_name = self.config.subword.base_representation
-        tokenizer_cls = TOKENIZER_TYPES[base_name]
-        tokenizer = tokenizer_cls(TokenizerConfig())
+        # Build the base tokenizer from the effective configuration, not from
+        # defaults: otherwise the subword tokens describe a different REMI than the
+        # `remi` representation does, and the decoder cannot know which.
+        tokenizer = build_tokenizer(self.config, base_name)
 
         train_token_sequences = [
             " ".join(
@@ -47,7 +48,7 @@ class SubwordBuilder(BaseRepresentationBuilder):
             )
             if piece_data.piece["maestro_split"] == "train"
         ]
-        tokenizer.train(
+        tokenizer.note_table_train(
             vocab_size=self.config.subword.vocab_size,
             model=self.model_name,
             iterator=train_token_sequences,
@@ -83,6 +84,7 @@ class SubwordBuilder(BaseRepresentationBuilder):
                         "maestro_split": segment["maestro_split"],
                         "token_file": str(token_path.relative_to(output_dir)),
                         "token_count": len(seq.ids),
+                        "encoder": "tokenizer",
                     }
                 )
         segments_df = pl.DataFrame(rows)

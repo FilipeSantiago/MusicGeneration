@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from storage import BuildState, Storage, build_storage
+
 from ..config import MusicRepresentationConfig
 from ..registry import REPRESENTATION_NAMES, create_builder
-from storage import BuildState, Storage, build_storage
 from .builder import BuildResult, BuildStatus
 
 ALL_REPRESENTATIONS = list(REPRESENTATION_NAMES)

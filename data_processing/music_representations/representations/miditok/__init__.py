@@ -1,4 +1,5 @@
 from .builders import (
+    TOKENIZER_TYPES,
     CPWordBuilder,
     MIDILikeBuilder,
     MidiTokRepresentationBuilder,
@@ -7,12 +8,12 @@ from .builders import (
     REMIBuilder,
     REMIPlusBuilder,
     StructuredBuilder,
-    TOKENIZER_TYPES,
     TSDBuilder,
 )
 from .subword import BPEBuilder, SubwordBuilder, UnigramBuilder, WordPieceBuilder
 
 __all__ = [
+    "TOKENIZER_TYPES",
     "BPEBuilder",
     "CPWordBuilder",
     "MIDILikeBuilder",
@@ -23,7 +24,6 @@ __all__ = [
     "REMIPlusBuilder",
     "StructuredBuilder",
     "SubwordBuilder",
-    "TOKENIZER_TYPES",
     "TSDBuilder",
     "UnigramBuilder",
     "WordPieceBuilder",

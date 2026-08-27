@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import muspy
 import polars as pl
 from symusic import (
@@ -171,3 +173,31 @@ def canonical_frames_to_muspy(frames: dict[str, pl.DataFrame]) -> muspy.Music:
             )
         )
     return music
+
+
+def canonical_frames_to_midi(
+    frames: dict[str, pl.DataFrame],
+    path: Path,
+    *,
+    ticks_per_quarter: int | None = None,
+) -> Path:
+    """The only canonical -> MIDI exit in the codebase."""
+    score = canonical_frames_to_symusic(frames)
+    if ticks_per_quarter is not None and ticks_per_quarter != score.ticks_per_quarter:
+        score = score.resample(ticks_per_quarter)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    score.dump_midi(str(path))
+    return path
+
+
+def canonical_piece_to_midi(
+    dataset: CanonicalDataset, piece_id: str, path: Path, **kwargs
+) -> Path:
+    return canonical_frames_to_midi(piece_frames(dataset, piece_id), path, **kwargs)
+
+
+def canonical_piece_data_to_midi(piece: CanonicalPiece, path: Path, **kwargs) -> Path:
+    return canonical_frames_to_midi(
+        piece_frames_from_canonical_piece(piece), path, **kwargs
+    )

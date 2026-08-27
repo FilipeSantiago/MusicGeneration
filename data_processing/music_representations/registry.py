@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from storage import Storage
+
+from .config import MusicRepresentationConfig
 from .core.base import BaseRepresentationBuilder
 from .core.builder import MusicRepresentationBuilder
-from .config import MusicRepresentationConfig
-from storage import Storage
 from .representations import CanonicalBuilder, NoteTableBuilder, PianoRollBuilder
 from .representations.miditok import (
     BPEBuilder,

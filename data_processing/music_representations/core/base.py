@@ -4,9 +4,10 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from storage import BuildState, LocalStorage, Storage
+
 from ..config import MusicRepresentationConfig
 from ..helpers.canonical_loader import load_canonical_dataset
-from storage import BuildState, LocalStorage, Storage
 from .builder import BuildResult, BuildStatus, MusicRepresentationBuilder
 
 

@@ -34,6 +34,8 @@ class SegmentationConfig:
 class NoteTableConfig:
     time_unit: str = "quarter"
     bin_size: float = field(default_factory=_default_note_table_bin)
+    # Width of the velocity bucket the dataloader exposes as `velocity_bin`.
+    velocity_bin_size: int = 8
 
 
 @dataclass(slots=True)
@@ -108,7 +110,7 @@ class MusicRepresentationConfig:
         segmentation = SegmentationConfig(**payload.pop("segmentation", {}))
         note_table = NoteTableConfig(**payload.pop("note_table", {}))
         piano_roll = PianoRollConfig(**payload.pop("piano_roll", {}))
-        miditok = MidiTokRepresentationConfig(**payload.pop("miditok", {}))
+        miditok = MidiTokRepresentationConfig(**_restore_miditok(payload.pop("miditok", {})))
         subword = SubwordConfig(**payload.pop("subword", {}))
         return cls(
             input_dir=Path(payload["input_dir"]),
@@ -129,6 +131,31 @@ class MusicRepresentationConfig:
             subword=subword,
             log_level=payload.get("log_level", "INFO"),
         )
+
+
+def _restore_miditok(payload: dict[str, Any]) -> dict[str, Any]:
+    """Undo `_normalize` for the fields whose Python type is not JSON-representable.
+
+    `beat_res` is keyed by `(start_beat, end_beat)` tuples and `pitch_range` is a
+    tuple; both come back as strings/lists from a manifest. Rebuilding a tokenizer
+    from those would silently use the wrong quantization grid.
+    """
+    payload = dict(payload)
+    beat_res = payload.get("beat_res")
+    if isinstance(beat_res, dict):
+        payload["beat_res"] = {
+            (key if isinstance(key, tuple) else _parse_beat_range(key)): int(value)
+            for key, value in beat_res.items()
+        }
+    pitch_range = payload.get("pitch_range")
+    if isinstance(pitch_range, list):
+        payload["pitch_range"] = tuple(pitch_range)
+    return payload
+
+
+def _parse_beat_range(key: str) -> tuple[int, int]:
+    start, end = key.strip("() ").split(",")
+    return int(start), int(end)
 
 
 def _normalize(value: Any) -> Any:
