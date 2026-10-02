@@ -111,3 +111,10 @@ TABLE_SCHEMAS: dict[str, pa.Schema] = {
 }
 
 TABLE_NAMES = tuple(TABLE_SCHEMAS)
+
+# The per-piece frames producers pass around (see ``build_canonical_frames``)
+# use the same names, except that the single piece row lives under the singular
+# "piece" rather than the "pieces" table it is later collected into.
+CANONICAL_FRAME_NAMES = tuple(
+    "piece" if name == "pieces" else name for name in TABLE_NAMES
+)

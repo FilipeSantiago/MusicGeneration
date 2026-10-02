@@ -4,6 +4,7 @@ from io import BytesIO
 
 import muspy
 import pretty_midi
+import python3_midi
 
 from data_processing.music_representations.core.canonical_data import CanonicalDataset
 from data_processing.music_representations.helpers.adapters import (
@@ -36,10 +37,15 @@ class MGEvalAdapter:
         midi_bytes = score.dumps_midi()
         music = canonical_piece_to_muspy(dataset, piece_id)
 
+        # MGEval's pattern metrics expect track 0 to hold global metadata and
+        # the notes to live on a later track. MusPy's Mido exporter guarantees
+        # that layout even when the source MIDI used a single combined track,
+        # so round-trip through it to get the python3-midi Pattern MGEval reads.
+        buffer = BytesIO()
+        muspy.to_mido(music).save(file=buffer)
+        buffer.seek(0)
+
         return {
             "pretty_midi": pretty_midi.PrettyMIDI(BytesIO(midi_bytes)),
-            # MGEval's track metrics default to track 1 and expect track 0 to
-            # hold global metadata. MusPy's Mido exporter guarantees that
-            # layout even when the source MIDI used a single combined track.
-            "midi_pattern": muspy.to_mido(music),
+            "midi_pattern": python3_midi.read_midifile(buffer),
         }

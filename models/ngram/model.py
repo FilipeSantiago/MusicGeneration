@@ -1,6 +1,6 @@
-import copy
-from collections import Counter, defaultdict
 import random
+from collections import Counter, defaultdict
+from heapq import heappop, heappush
 
 
 class Model:
@@ -18,7 +18,7 @@ class Model:
         EOF = -1000
 
         while 2 <= x <= n:
-            model = defaultdict(Counter)  # noqa: F821
+            model = defaultdict(Counter)
             for batch in self.loader:
                 for song in batch:
                     note_tokens = song['tokens']
@@ -32,20 +32,20 @@ class Model:
             x -= 1
     
     def remi_predict(self, tokens):
-        next_token = None
         x = self.n
 
         while x > 1:
             use_tokens = tokens[(x - 1) * -1 :]
             model = self.models[self.n - x]
-            next_token_candidates = model[use_tokens]
+            next_token_candidates = model.get(use_tokens)
 
-            if sum(next_token_candidates.values()) < 10:
-                x -= 1
-            else:
+            x -= 1
+            if next_token_candidates and (
+                next_token_candidates.total() >= 10 or x == 1
+            ):
                 return random.choices(list(next_token_candidates.keys()), next_token_candidates.values())
 
-        return next_token
+        return None
 
     
     def note_table_train(self):
@@ -55,7 +55,7 @@ class Model:
         EOF = ("<EOF>", "<EOF>", "<EOF>", "<EOF>")
 
         while 2 <= x <= n:
-            model = defaultdict(Counter)  # noqa: F821
+            model = defaultdict(Counter)
             for batch in self.loader:
                 for song in batch:
                     note_tokens = list(
@@ -72,43 +72,58 @@ class Model:
             x -= 1
 
     def note_table_predict(self, tokens):
-        next_token = None
         x = self.n
 
         while x > 1:
             use_tokens = tokens[(x - 1) * -1 :]
             model = self.models[self.n - x]
-            next_token_candidates = model[use_tokens]
-            sequences = set(use_tokens)
-            i = 0
+            next_token_candidates = Counter(model.get(use_tokens, ()))
+            candidate_count = next_token_candidates.total()
 
-            while sum(next_token_candidates.values()) < 10 and i < len(use_tokens):
-                options = [
-                    neighbor
-                    for neighbor, _distance in self.neighbors.get(
-                        use_tokens[i], ()
-                    )
+            if candidate_count < 10 and self.neighbors:
+                options_by_position = [
+                    [(token, 0.0), *self.neighbors.get(token, ())]
+                    for token in use_tokens
                 ]
-                if not options:
-                    i += 1
-                    continue
+                exact_indices = (0,) * len(use_tokens)
+                pending = [(0.0, exact_indices)]
+                visited = {exact_indices}
 
-                sequences = [
-                    sequence[:i] + (option,) + sequence[i + 1 :]
-                    for sequence in sequences
-                    for option in options
-                ]
+                while pending and candidate_count < 10:
+                    distance, indices = heappop(pending)
+                    if indices != exact_indices:
+                        sequence = tuple(
+                            options_by_position[position][option_index][0]
+                            for position, option_index in enumerate(indices)
+                        )
+                        counts = model.get(sequence)
+                        if counts:
+                            next_token_candidates.update(counts)
+                            candidate_count += counts.total()
 
-                # print(x, i, len(sequences))
-                for sequence in sequences:
-                    next_token_candidates += Counter(model[sequence[0],])
+                    for position, option_index in enumerate(indices):
+                        next_index = option_index + 1
+                        if next_index >= len(options_by_position[position]):
+                            continue
+                        next_indices = (
+                            indices[:position]
+                            + (next_index,)
+                            + indices[position + 1 :]
+                        )
+                        if next_indices in visited:
+                            continue
+                        visited.add(next_indices)
+                        next_distance = (
+                            distance
+                            - options_by_position[position][option_index][1]
+                            + options_by_position[position][next_index][1]
+                        )
+                        heappush(pending, (next_distance, next_indices))
 
-                i += 1
             x -= 1
-            if sum(next_token_candidates.values()) > 10 or x == 1:
-                next_token = random.choices(
+            if candidate_count >= 10 or x == 1:
+                return random.choices(
                     list(next_token_candidates.keys()), next_token_candidates.values()
                 )
-                break
 
-        return next_token
+        return None

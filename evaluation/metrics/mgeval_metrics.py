@@ -1,26 +1,36 @@
 import polars as pl
+
 from evaluation.model import MGDataset
+from evaluation.vendor.mgeval_core import Feature, MgevalMetrics
+
+# The two MIDI views an MGEval feature carries are indexed differently. The
+# PrettyMIDI view holds one instrument per track, so the notes are instrument 0.
+# The pattern view comes from Mido, whose track 0 is the metadata track, which
+# puts the notes on track 1.
+PRETTY_MIDI_TRACK = 0
+PATTERN_TRACK = 1
 
 
 class MGEvalMetric:
-    name = "average_pitch_interval"
+    name = "mgeval"
 
     def compute(self, dataset: MGDataset) -> pl.DataFrame:
+        metrics = MgevalMetrics()
         rows = []
 
-        for piece_id, feature in dataset.pieces.items():
+        for piece_id, piece in dataset.pieces.items():
+            feature = Feature(piece["pretty_midi"], piece["midi_pattern"])
             rows.append(
                 {
                     "piece_id": piece_id,
-                    "pitch_count": feature.total_used_pitch(),
-                    "pitch_class_distribution": feature.total_pitch_class_histogram(),
-                    "pitch_class_transitions": feature.pitch_class_transition_matrix(),
-                    "pitch_range": feature.pitch_range(),
-                    "avg_pitch_shift": feature.avg_pitch_shift(),
-                    "note_count": feature.total_used_note(),
-                    "avg_IOI": feature.avg_IOI(),
-                    "note_length_hist": feature.note_length_hist(),
-                    "duration_transitions": feature.note_length_transition_matrix(),
+                    "pitch_class_distribution": metrics.total_pitch_class_histogram(
+                        feature, PRETTY_MIDI_TRACK
+                    ),
+                    "avg_pitch_shift": metrics.avg_pitch_shift(feature, PATTERN_TRACK),
+                    "avg_IOI": metrics.avg_IOI(feature, PRETTY_MIDI_TRACK),
+                    "note_length_hist": metrics.note_length_hist(
+                        feature, track_num=PATTERN_TRACK
+                    ),
                 }
             )
 

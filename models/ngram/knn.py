@@ -14,7 +14,6 @@ class KNN:
         self.scales = np.array([velocity_scale, data_scale, duration_scale,])
 
     def get_nearest_neighbors(self, token_counts_by_pitch):
-
         nearest_neighbors = {}
 
         for pitch, counts in token_counts_by_pitch.items():
