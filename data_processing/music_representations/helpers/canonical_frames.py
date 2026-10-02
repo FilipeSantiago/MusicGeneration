@@ -7,7 +7,7 @@ import polars as pl
 import pyarrow as pa
 from symusic import Score
 
-from ..schemas import TABLE_SCHEMAS
+from ..schemas import CANONICAL_FRAME_NAMES, TABLE_SCHEMAS
 from .adapters import canonical_frames_to_symusic
 
 DEFAULT_TICKS_PER_QUARTER = 480
@@ -70,16 +70,16 @@ def build_canonical_frames(
     )
 
     # Cast through the schemas so empty tables still carry their columns.
-    tick_frames = {
-        "piece": _frame([{"piece_id": piece_id, "ticks_per_quarter": tpq}], "pieces"),
-        "tracks": _frame(track_rows, "tracks"),
-        "notes": _frame(note_rows, "notes"),
-        "tempos": _frame(tempo_rows, "tempos"),
-        "time_signatures": _frame(time_signature_rows, "time_signatures"),
-        "key_signatures": _frame(key_signature_rows, "key_signatures"),
-        "control_changes": _frame(control_rows, "control_changes"),
-        "pitch_bends": _frame(bend_rows, "pitch_bends"),
-    }
+    tick_frames = _frame_dict(
+        {"piece_id": piece_id, "ticks_per_quarter": tpq},
+        track_rows,
+        note_rows,
+        tempo_rows,
+        time_signature_rows,
+        key_signature_rows,
+        control_rows,
+        bend_rows,
+    )
     score = canonical_frames_to_symusic(tick_frames)
     _fill_seconds(score, tpq, note_rows, control_rows, bend_rows, tempo_rows,
                   time_signature_rows, key_signature_rows)
@@ -93,16 +93,16 @@ def build_canonical_frames(
     for field in PIECE_METADATA_FIELDS:
         piece_row[field] = (metadata or {}).get(field)
 
-    return {
-        "piece": _frame([piece_row], "pieces"),
-        "tracks": _frame(track_rows, "tracks"),
-        "notes": _frame(note_rows, "notes"),
-        "tempos": _frame(tempo_rows, "tempos"),
-        "time_signatures": _frame(time_signature_rows, "time_signatures"),
-        "key_signatures": _frame(key_signature_rows, "key_signatures"),
-        "control_changes": _frame(control_rows, "control_changes"),
-        "pitch_bends": _frame(bend_rows, "pitch_bends"),
-    }
+    return _frame_dict(
+        piece_row,
+        track_rows,
+        note_rows,
+        tempo_rows,
+        time_signature_rows,
+        key_signature_rows,
+        control_rows,
+        bend_rows,
+    )
 
 
 def symusic_to_canonical_frames(
@@ -172,6 +172,35 @@ def symusic_to_canonical_frames(
         control_changes=control_changes,
         pitch_bends=pitch_bends,
         metadata=metadata,
+    )
+
+
+def _frame_dict(
+    piece_row: dict[str, Any],
+    track_rows: Sequence[dict[str, Any]],
+    note_rows: Sequence[dict[str, Any]],
+    tempo_rows: Sequence[dict[str, Any]],
+    time_signature_rows: Sequence[dict[str, Any]],
+    key_signature_rows: Sequence[dict[str, Any]],
+    control_rows: Sequence[dict[str, Any]],
+    bend_rows: Sequence[dict[str, Any]],
+) -> dict[str, pl.DataFrame]:
+    """Key the eight canonical frames by :data:`CANONICAL_FRAME_NAMES`."""
+    return dict(
+        zip(
+            CANONICAL_FRAME_NAMES,
+            (
+                _frame([piece_row], "pieces"),
+                _frame(track_rows, "tracks"),
+                _frame(note_rows, "notes"),
+                _frame(tempo_rows, "tempos"),
+                _frame(time_signature_rows, "time_signatures"),
+                _frame(key_signature_rows, "key_signatures"),
+                _frame(control_rows, "control_changes"),
+                _frame(bend_rows, "pitch_bends"),
+            ),
+            strict=True,
+        )
     )
 
 

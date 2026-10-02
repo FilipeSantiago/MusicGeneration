@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import polars as pl
+import python3_midi
 
 from data_processing.music_representations.config import MusicRepresentationConfig
 from data_processing.music_representations.helpers.canonical_loader import (
@@ -42,5 +43,8 @@ def test_mgeval_adapter_builds_both_midi_views(
     assert len(converted) == canonical.pieces.height
     assert piece["pretty_midi"].resolution == 480
     assert piece["pretty_midi"].instruments[0].notes[0].pitch == 60
-    assert piece["midi_pattern"].ticks_per_beat == 480
-    assert len(piece["midi_pattern"].tracks) >= 2
+    # MGEval reads the pattern view, so it must be a python3-midi Pattern whose
+    # track 0 is metadata and whose notes live on a later track.
+    assert isinstance(piece["midi_pattern"], python3_midi.Pattern)
+    assert piece["midi_pattern"].resolution == 480
+    assert len(piece["midi_pattern"]) >= 2

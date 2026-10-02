@@ -1,13 +1,12 @@
-from typing import Any
-
 import numpy as np
 import polars as pl
 from scipy.spatial.distance import jensenshannon
+from tqdm import tqdm
 
 
 class DatasetEvaluation:
 
-    def __init__(self, dataset1_metrics, dataset2_metrics):
+    def __init__(self, dataset1_metrics: pl.DataFrame, dataset2_metrics: pl.DataFrame) -> None:
         self.dataset1_metrics = dataset1_metrics
         self.dataset2_metrics = dataset2_metrics
 
@@ -16,11 +15,18 @@ class DatasetEvaluation:
         histogram_variables = ["pitch_class_distribution", "note_length_hist"]
 
         results = {}
+        
+        print("Eval scalar_variables ...")
+        for column in tqdm(scalar_variables):
+            results[column] = self.__scalar_jsd__(
+                self.dataset1_metrics, self.dataset2_metrics, column
+            )
 
-        for column in scalar_variables:
-            results[column] = self.__scalar_jsd__(self.dataset1_metrics[column], self.dataset2_metrics[column], column)
-        for column in histogram_variables:
-            results[column] = self.__histogram_jsd__(self.dataset1_metrics[column], self.dataset2_metrics[column], column)
+        print("Eval histogram_variables ...")
+        for column in tqdm(histogram_variables):
+            results[column] = self.__histogram_jsd__(
+                self.dataset1_metrics, self.dataset2_metrics, column
+            )
         return results
 
     @staticmethod
@@ -42,7 +48,7 @@ class DatasetEvaluation:
         ref_hist, _ = np.histogram(ref, bins=edges)
         gen_hist, _ = np.histogram(gen, bins=edges)
 
-        return jensenshannon(ref_hist, gen_hist, base=2,) ** 2
+        return float(jensenshannon(ref_hist, gen_hist, base=2) ** 2)
 
     @staticmethod
     def __histogram_jsd__(
@@ -54,8 +60,11 @@ class DatasetEvaluation:
         ref = np.stack(reference[column].to_list()).sum(axis=0)
         gen = np.stack(generated[column].to_list()).sum(axis=0)
 
-        return jensenshannon(
-            ref,
-            gen,
-            base=2,
-        ) ** 2
+        return float(
+            jensenshannon(
+                ref,
+                gen,
+                base=2,
+            )
+            ** 2
+        )

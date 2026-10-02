@@ -17,6 +17,7 @@ dependencies = [
     "pyarrow",
     "pypianoroll>=1.0.4",
     "pytest>=9.1.1",
+    "python3-midi>=0.2.5",
     "ruff>=0.16.0",
     "scipy>=1.18.0",
     "symusic",
@@ -27,6 +28,11 @@ dependencies = [
 [tool.mypy]
 ignore_missing_imports = true
 disable_error_code = ["attr-defined", "valid-type"]
+
+[tool.ruff]
+# Vendored upstream code is kept close to its original form so it stays easy to
+# diff against MGEval; see evaluation/vendor/mgeval_core.py.
+extend-exclude = ["evaluation/vendor"]
 
 [tool.ruff.lint.per-file-ignores]
 "data_processing/midi_to_canonical.py" = ["RUF012"]

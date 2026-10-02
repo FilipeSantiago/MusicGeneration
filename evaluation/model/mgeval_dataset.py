@@ -3,15 +3,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TypedDict
 
-import mido
 import pretty_midi
+import python3_midi
 
 
 class MGEvalPiece(TypedDict):
     """The two MIDI views consumed by MGEval-style metrics."""
 
     pretty_midi: pretty_midi.PrettyMIDI
-    midi_pattern: mido.MidiFile
+    midi_pattern: python3_midi.Pattern
 
 
 class MGDataset:
