@@ -16,14 +16,16 @@ class DatasetEvaluation:
 
         results = {}
         
-        print("Eval scalar_variables ...")
-        for column in tqdm(scalar_variables):
+        for column in tqdm(
+            scalar_variables, desc="Scalar JSD", unit="metric", disable=None
+        ):
             results[column] = self.__scalar_jsd__(
                 self.dataset1_metrics, self.dataset2_metrics, column
             )
 
-        print("Eval histogram_variables ...")
-        for column in tqdm(histogram_variables):
+        for column in tqdm(
+            histogram_variables, desc="Histogram JSD", unit="metric", disable=None
+        ):
             results[column] = self.__histogram_jsd__(
                 self.dataset1_metrics, self.dataset2_metrics, column
             )
