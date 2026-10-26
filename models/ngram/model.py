@@ -1,6 +1,11 @@
+import logging
 import random
 from collections import Counter, defaultdict
 from heapq import heappop, heappush
+
+from tqdm.auto import tqdm
+
+LOGGER = logging.getLogger(__name__)
 
 
 class Model:
@@ -11,7 +16,7 @@ class Model:
         self.n = n
         self.models = []
 
-    def remi_train(self):
+    def remi_train(self, *, show_progress: bool = False):
         x = n = self.n
 
         BOS = -1
@@ -19,7 +24,20 @@ class Model:
 
         while 2 <= x <= n:
             model = defaultdict(Counter)
-            for batch in self.loader:
+            if show_progress:
+                LOGGER.info("Training REMI %s-gram", x)
+            batches = (
+                tqdm(
+                    self.loader,
+                    total=len(self.loader) if hasattr(self.loader, "__len__") else None,
+                    desc=f"REMI {x}-gram",
+                    unit="batch",
+                    disable=None,
+                )
+                if show_progress
+                else self.loader
+            )
+            for batch in batches:
                 for song in batch:
                     note_tokens = song['tokens']
                     note_tokens = [BOS] * (x - 1) + note_tokens + [EOF]
@@ -29,6 +47,8 @@ class Model:
                         model[context][target] += 1
 
             self.models.append(model)
+            if show_progress:
+                LOGGER.info("REMI %s-gram complete: %s contexts", x, len(model))
             x -= 1
     
     def remi_predict(self, tokens):
@@ -48,7 +68,7 @@ class Model:
         return None
 
     
-    def note_table_train(self):
+    def note_table_train(self, *, show_progress: bool = False):
         x = n = self.n
 
         BOS = ("<BOS>", "<BOS>", "<BOS>", "<BOS>")
@@ -56,7 +76,20 @@ class Model:
 
         while 2 <= x <= n:
             model = defaultdict(Counter)
-            for batch in self.loader:
+            if show_progress:
+                LOGGER.info("Training note-table %s-gram", x)
+            batches = (
+                tqdm(
+                    self.loader,
+                    total=len(self.loader) if hasattr(self.loader, "__len__") else None,
+                    desc=f"Note-table {x}-gram",
+                    unit="batch",
+                    disable=None,
+                )
+                if show_progress
+                else self.loader
+            )
+            for batch in batches:
                 for song in batch:
                     note_tokens = list(
                         zip(song["pitch"], song["velocity_bin"], song["delta_onset_bin"], song["duration_bin"],)
@@ -69,6 +102,8 @@ class Model:
                         model[context][target] += 1
 
             self.models.append(model)
+            if show_progress:
+                LOGGER.info("Note-table %s-gram complete: %s contexts", x, len(model))
             x -= 1
 
     def note_table_predict(self, tokens):
