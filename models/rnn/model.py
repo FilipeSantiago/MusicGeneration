@@ -13,8 +13,15 @@ class MusicRNN(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
         self.rnn = nn.RNN(embedding_dim, hidden_size, batch_first=True)
-        self.output = nn.Linear(hidden_size, vocab_size)
+        self.rnn2 = nn.RNN(hidden_size, hidden_size*2, batch_first=True)
+        self.output = nn.Linear(hidden_size*2, vocab_size)
 
-    def forward(self, x: torch.Tensor, hidden: torch.Tensor | None = None):
-        values, hidden = self.rnn(self.embedding(x), hidden)
-        return self.output(values), hidden
+    def forward(
+        self,
+        x: torch.Tensor,
+        hidden: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ):
+        first, second = hidden if hidden is not None else (None, None)
+        values, first = self.rnn(self.embedding(x), first)
+        values, second = self.rnn2(values, second)
+        return self.output(values), (first, second)
