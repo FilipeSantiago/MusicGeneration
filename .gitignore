@@ -17,3 +17,5 @@ env/
 .env
 openspec
 .codepartner
+# Generated samples and videos
+generated/
