@@ -31,6 +31,7 @@ from evaluation.metrics import DatasetEvaluation, MGEvalMetric, MusPyMetrics
 from evaluation.parsers import MGEvalAdapter, MusPyAdapter
 from trainer.factory import RunFactory
 from trainer.runs import TrainedModel
+from trainer import tracking
 from trainer.settings import TrainSettings
 
 LOGGER = logging.getLogger(__name__)
@@ -225,6 +226,15 @@ def save(settings: TrainSettings, trained: TrainedModel, generated_root: Path, r
         json.dumps(result, indent=2) + "\n", encoding="utf-8"
     )
     LOGGER.info("Saved model to %s and metrics to %s", checkpoint, output / "metrics.json")
+    tracking.log_metrics(
+        {
+            **{f"jsd/{name}": score for name, score in scores.items()},
+            "jsd/mean": sum(scores.values()) / len(scores) if scores else math.nan,
+            "reference_pieces": reference_pieces,
+            "generated_pieces": generated_pieces,
+        }
+    )
+    tracking.log_artifact(output / "metrics.json")
     return result
 
 
@@ -241,6 +251,11 @@ def _run_stage(name, action, *args):
 
 
 def run(settings: TrainSettings) -> dict[str, Any]:
+    with tracking.start_run(settings):
+        return _run(settings)
+
+
+def _run(settings: TrainSettings) -> dict[str, Any]:
     random.seed(settings.seed)
     np.random.seed(settings.seed % (2**32))
     torch.manual_seed(settings.seed)

@@ -12,6 +12,7 @@ from tqdm.auto import tqdm
 
 from data_loader.raw_dataloader import RawDataloader
 from models.rnn.model import MusicRNN
+from trainer import tracking
 from trainer.settings import TrainSettings
 
 LOGGER = logging.getLogger(__name__)
@@ -79,6 +80,7 @@ class RNNRun:
             for name, value in vocab.items()
             if name.split("_", 1)[0] in {"PAD", "BOS", "MASK"}
         }
+        global_step = 0
         for epoch in range(self.settings.rnn_epochs):
             model.train()
             loss_sum = 0.0
@@ -102,8 +104,12 @@ class RNNRun:
                 loss = criterion(logits.reshape(-1, vocab_size), y.reshape(-1))
                 loss.backward()
                 optimizer.step()
-                loss_sum += loss.item()
+                batch_loss = loss.item()
+                loss_sum += batch_loss
                 batch_count += 1
+                global_step += 1
+                if global_step % 10 == 0:
+                    tracking.log_metric("train/batch_loss", batch_loss, step=global_step)
                 if batch_count % 10 == 0:
                     progress.set_postfix(
                         batch=batch_count,
@@ -114,6 +120,7 @@ class RNNRun:
                 raise ValueError("No 256-token REMI training windows were available")
             mean_loss = loss_sum / batch_count
             self.epoch_losses.append(mean_loss)
+            tracking.log_metric("train/epoch_loss", mean_loss, step=epoch + 1)
             LOGGER.info(
                 "RNN epoch %s/%s complete: %s batches, mean loss=%.4f",
                 epoch + 1,

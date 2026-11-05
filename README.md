@@ -305,6 +305,14 @@ When S3 storage is enabled this directory becomes the staging and cache root ins
 | `MUSIC_TRAIN_KNN_K` | `5` | nearest neighbours for the note-table n-gram |
 | `MUSIC_TRAIN_RNN_EPOCHS` | `30` | RNN epochs |
 
+### MLflow tracking
+
+Set `MLFLOW_TRACKING_URI` (and optionally `MLFLOW_EXPERIMENT_NAME`) to log every training run to MLflow; leave it empty to disable tracking. Each run is named `<model>_<representation>_<YYYY-MM-DD_HH-MM-SS>` (e.g. `rnn_remi_2026-11-05_14-03-22`) and records:
+
+- parameters: every `TrainSettings` field, plus `model` / `representation` tags;
+- losses: `train/epoch_loss` per epoch and `train/batch_loss` every 10 batches (RNN);
+- metrics: `jsd/<metric>` for each validation JSD score, `jsd/mean`, `reference_pieces`, `generated_pieces`;
+- artifact: the run's `metrics.json`.
 
 ### Optional variables
 
