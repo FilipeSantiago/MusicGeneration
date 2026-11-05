@@ -233,9 +233,9 @@ The vocabulary is trained on the training split only, then applied unchanged to 
 
 Important paths:
 
-- [`main.py`](./main.py): root runner for PyCharm or command-line use.
+- [`main.py`](./main.py): single entry point: builds the configured representations, then trains the configured model.
 - [`data_processing/music_representations/`](./data_processing/music_representations): preprocessing package.
-- [`.env`](./.env): default runtime configuration for `main.py`.
+- [`.env`](./.env): the only runtime configuration for `main.py` (loaded with `python-dotenv`).
 - [`storage/`](storage): local and S3 storage backends.
 - [`tests/`](./tests): synthetic-fixture tests for the preprocessing layer.
 
@@ -247,16 +247,16 @@ The intended entrypoint is the root runner:
 uv run python main.py
 ```
 
-That runner can also still accept explicit CLI flags, but the normal PyCharm workflow is:
+It takes no arguments; the workflow is:
 
 1. edit `.env`;
 2. run `main.py`.
 
+It first builds the representations listed in `MUSIC_REPR_REPRESENTATIONS` (existing ones are skipped unless `MUSIC_REPR_OVERWRITE=true`), always including the one the model trains on, and then runs the training pipeline (train, generate, evaluate, save). Leave `MUSIC_TRAIN_MODEL` empty to only build data.
+
 ## Environment Variables
 
-The root runner reads `.env` from the repository root and loads variables with the prefix `MUSIC_REPR_`.
-
-If CLI arguments are passed, they override `.env`. If no CLI arguments are passed, `main.py` uses `.env`.
+The root runner loads `.env` from the repository root with `python-dotenv`. Variables already set in the real environment take precedence over the file. `MUSIC_REPR_*` variables configure the representation builds and `MUSIC_TRAIN_*` variables configure training.
 
 ### Required variables
 
@@ -288,6 +288,23 @@ MUSIC_REPR_OUTPUT_DIR=/home/you/data/maestro_preprocessed
 ```
 
 When S3 storage is enabled this directory becomes the staging and cache root instead of the final destination. See [Storage Backends](#storage-backends).
+
+### Training variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MUSIC_TRAIN_MODEL` | empty | `ngram_remi`, `ngram_note_table` or `rnn_remi`; empty = build representations only |
+| `MUSIC_TRAIN_OUTPUT_DIR` | required with a model | runs are written to `<dir>/<model>/` |
+| `MUSIC_TRAIN_REPRESENTATION` | `remi` | representation to train on (any decodable name, e.g. `bpe`, `tsd`); `ngram_note_table` needs `note_table` |
+| `MUSIC_TRAIN_SEED` | `20260912` | seed for training and generation |
+| `MUSIC_TRAIN_GENERATED_PIECES` | `250` | pieces generated for evaluation |
+| `MUSIC_TRAIN_MAX_ATTEMPTS` | `10` | generation retries per piece |
+| `MUSIC_TRAIN_REMI_MAX_TOKENS` | `2048` | token budget per generated REMI piece |
+| `MUSIC_TRAIN_NOTE_MAX_TOKENS` | `512` | token budget per generated note-table piece |
+| `MUSIC_TRAIN_REMI_N` / `MUSIC_TRAIN_NOTE_N` | `3` / `5` | n-gram orders |
+| `MUSIC_TRAIN_KNN_K` | `5` | nearest neighbours for the note-table n-gram |
+| `MUSIC_TRAIN_RNN_EPOCHS` | `30` | RNN epochs |
+
 
 ### Optional variables
 
@@ -447,7 +464,7 @@ A run asks the backend for one of three states:
 | `in_progress` | a live lease is held | `locked` — moves on to the next representation |
 | `missing` | neither | claims the lease and builds |
 
-The lease is an object at `s3://$AWS_BUCKET/$MUSIC_REPR_S3_PREFIX/_locks/<representation>.json`, claimed with a conditional `PutObject` (`IfNoneMatch: *`) so two runs racing for the same representation cannot both win. It sits beside the representation rather than inside it, so it never shows up in `manifest.json`'s file list and is not deleted by an `--overwrite` rebuild. The local backend does the same thing with `O_EXCL` under `$MUSIC_REPR_OUTPUT_DIR/_locks/`.
+The lease is an object at `s3://$AWS_BUCKET/$MUSIC_REPR_S3_PREFIX/_locks/<representation>.json`, claimed with a conditional `PutObject` (`IfNoneMatch: *`) so two runs racing for the same representation cannot both win. It sits beside the representation rather than inside it, so it never shows up in `manifest.json`'s file list and is not deleted by an overwrite (`MUSIC_REPR_OVERWRITE=true`) rebuild. The local backend does the same thing with `O_EXCL` under `$MUSIC_REPR_OUTPUT_DIR/_locks/`.
 
 While a build runs, a background thread refreshes the lease. If the process is killed, the lease stops being refreshed and expires, and the next run reclaims it — so a hard kill costs you `MUSIC_REPR_LOCK_TTL` seconds, not a stuck representation.
 

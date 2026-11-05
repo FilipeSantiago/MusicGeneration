@@ -105,9 +105,8 @@ def _generated_frames(
     )
 
 
-def prepare_dataset(settings: TrainSettings):
-    """Load training rows and the explicit canonical validation split."""
-    representation = "note_table" if settings.model == "ngram_note_table" else "remi"
+def prepare_dataset(representation: str):
+    """Load ``representation``'s training rows and the canonical validation split."""
     dataloader = RawDataloader()
     dataloader.prepare_dataset(representation=representation)
     if dataloader.train_df.empty:
@@ -252,7 +251,7 @@ def run(settings: TrainSettings) -> dict[str, Any]:
         settings.output_dir / settings.model,
     )
     dataloader, validation, decoder, canonical_root, representation = _run_stage(
-        "Prepare dataset", prepare_dataset, settings
+        "Prepare dataset", prepare_dataset, settings.representation
     )
 
     trained = _run_stage("Train", train, settings, dataloader, decoder)

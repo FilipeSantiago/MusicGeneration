@@ -20,14 +20,12 @@ from data_processing.music_representations.helpers.canonical_writer import (
 from models.ngram.model import Model
 from models.rnn.model import MusicRNN
 from trainer import MODEL_NAMES, TrainSettings, pipeline
-from trainer import settings as settings_module
 from trainer.factory import RunFactory
 from trainer.runs import NgramRun, RNNRun
 
 
 @pytest.mark.parametrize("model", MODEL_NAMES)
 def test_no_argument_settings_select_each_model(monkeypatch, tmp_path: Path, model: str) -> None:
-    monkeypatch.setattr(settings_module, "load_dotenv", lambda _path: None)
     monkeypatch.setenv("MUSIC_TRAIN_MODEL", model)
     monkeypatch.setenv("MUSIC_TRAIN_OUTPUT_DIR", str(tmp_path))
     monkeypatch.setenv("MUSIC_REPR_INPUT_DIR", str(tmp_path / "input"))
@@ -49,7 +47,10 @@ def test_no_argument_settings_select_each_model(monkeypatch, tmp_path: Path, mod
 def test_run_factory_selects_model_and_checkpoint(
     tmp_path: Path, model: str, run_type: type, checkpoint_name: str
 ) -> None:
-    settings = TrainSettings(model, tmp_path, 11, 1, 2, 16, 16, 3, 5, 2, 1)
+    representation = "note_table" if model == "ngram_note_table" else "remi"
+    settings = TrainSettings(
+        model, tmp_path, 11, 1, 2, 16, 16, 3, 5, 2, 1, representation
+    )
     dataloader = SimpleNamespace()
     decoder = SimpleNamespace()
     trained = RunFactory.create(settings, dataloader, decoder)
@@ -73,6 +74,7 @@ def test_ngram_training_and_checkpoint(
 ) -> None:
     settings = TrainSettings(
         model="ngram_remi" if representation == "remi" else "ngram_note_table",
+        representation=representation,
         output_dir=tmp_path,
         seed=11,
         generated_pieces=1,
@@ -350,3 +352,68 @@ def test_failed_validation_does_not_save_checkpoint(
     assert (
         "Generate dataset failed" if failure_stage == "generate_dataset" else "Evaluate failed"
     ) in caplog.text
+
+
+def test_representation_comes_from_settings(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MUSIC_TRAIN_MODEL", "rnn_remi")
+    monkeypatch.setenv("MUSIC_TRAIN_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setenv("MUSIC_REPR_INPUT_DIR", str(tmp_path / "input"))
+    monkeypatch.setenv("MUSIC_REPR_OUTPUT_DIR", str(tmp_path / "prepared"))
+    assert TrainSettings.from_env().representation == "remi"  # default
+    monkeypatch.setenv("MUSIC_TRAIN_REPRESENTATION", "BPE")
+    assert TrainSettings.from_env().representation == "bpe"
+    monkeypatch.setenv("MUSIC_TRAIN_REPRESENTATION", "not_a_representation")
+    with pytest.raises(ValueError, match="MUSIC_TRAIN_REPRESENTATION"):
+        TrainSettings.from_env()
+
+
+def test_prepare_dataset_uses_the_given_representation(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config = MusicRepresentationConfig(tmp_path / "input", tmp_path / "prepared")
+    canonical_root = config.output_dir / "canonical"
+    write_canonical_dataset(
+        canonical_root,
+        [
+            build_canonical_frames(
+                piece_id="valid",
+                notes=[
+                    {"track_id": 0, "onset_tick": i * 240, "duration_tick": 120,
+                     "pitch": 60 + i, "velocity": 80}
+                    for i in range(3)
+                ],
+                metadata={"maestro_split": "validation"},
+            )
+        ],
+        config=config,
+        source_dataset_fingerprint="test-fingerprint",
+    )
+    seen = {}
+
+    class Dataloader:
+        storage = SimpleNamespace(materialize=lambda name: config.output_dir / name)
+
+        def __init__(self):
+            self.config = config
+            self.train_df = pd.DataFrame({"piece_id": ["train"]})
+
+        def prepare_dataset(self, representation):
+            seen["loader"] = representation
+
+    def decoder(representation, _config, _storage):
+        seen["decoder"] = representation
+        return SimpleNamespace(representation_dir=config.output_dir / representation)
+
+    monkeypatch.setattr(pipeline, "RawDataloader", Dataloader)
+    monkeypatch.setattr(pipeline, "create_decoder", decoder)
+    *_, representation = pipeline.prepare_dataset("structured")
+    assert representation == "structured"
+    assert seen == {"loader": "structured", "decoder": "structured"}
+
+
+def test_ngram_rejects_a_conflicting_representation(tmp_path: Path) -> None:
+    settings = TrainSettings(
+        "ngram_note_table", tmp_path, 11, 1, 2, 16, 16, 3, 5, 2, 1, "remi"
+    )
+    with pytest.raises(ValueError, match="trains on 'note_table'"):
+        RunFactory.create(settings, SimpleNamespace(), None)

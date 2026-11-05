@@ -1,4 +1,4 @@
-"""Environment-backed settings for a no-argument training run."""
+"""Environment-backed settings for a training run (``.env`` is loaded by ``main.py``)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from main import DOTENV_PATH, load_dotenv
+from data_processing.music_representations.decoders.registry import DECODER_NAMES
 
 MODEL_NAMES = ("ngram_remi", "ngram_note_table", "rnn_remi")
 
@@ -35,10 +35,12 @@ class TrainSettings:
     note_ngram_order: int
     knn_neighbors: int
     rnn_epochs: int
+    # Any decodable representation name (see ``DECODER_NAMES``); the dataset
+    # under ``$MUSIC_REPR_OUTPUT_DIR/<representation>`` is what gets trained on.
+    representation: str = "remi"
 
     @classmethod
     def from_env(cls) -> TrainSettings:
-        load_dotenv(DOTENV_PATH)
         model = os.environ.get("MUSIC_TRAIN_MODEL", "").strip().lower()
         if model not in MODEL_NAMES:
             raise ValueError(
@@ -56,6 +58,13 @@ class TrainSettings:
             seed = int(seed_raw)
         except ValueError as exc:
             raise ValueError(f"MUSIC_TRAIN_SEED must be an integer, got {seed_raw!r}") from exc
+        representation = (
+            os.environ.get("MUSIC_TRAIN_REPRESENTATION", "remi").strip().lower()
+        )
+        if representation not in DECODER_NAMES:
+            raise ValueError(
+                "MUSIC_TRAIN_REPRESENTATION must be one of " + ", ".join(DECODER_NAMES)
+            )
         remi_order = _positive_int("MUSIC_TRAIN_REMI_N", 3)
         note_order = _positive_int("MUSIC_TRAIN_NOTE_N", 5)
         if min(remi_order, note_order) < 2:
@@ -72,4 +81,5 @@ class TrainSettings:
             note_ngram_order=note_order,
             knn_neighbors=_positive_int("MUSIC_TRAIN_KNN_K", 5),
             rnn_epochs=_positive_int("MUSIC_TRAIN_RNN_EPOCHS", 30),
+            representation=representation,
         )
