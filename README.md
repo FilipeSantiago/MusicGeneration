@@ -233,30 +233,41 @@ The vocabulary is trained on the training split only, then applied unchanged to 
 
 Important paths:
 
-- [`main.py`](./main.py): single entry point: builds the configured representations, then trains the configured model.
+- [`construct_data_representations.py`](./construct_data_representations.py): builds configured representations.
+- [`train_pipeline.py`](./train_pipeline.py): trains using completed representations.
 - [`data_processing/music_representations/`](./data_processing/music_representations): preprocessing package.
-- [`.env`](./.env): the only runtime configuration for `main.py` (loaded with `python-dotenv`).
+- [`.env`](./.env): runtime configuration for both entry points (loaded with `python-dotenv`).
 - [`storage/`](storage): local and S3 storage backends.
 - [`tests/`](./tests): synthetic-fixture tests for the preprocessing layer.
 
 ## Running the Project
 
-The intended entrypoint is the root runner:
+Build representations when needed, then train using the completed artifacts:
 
 ```bash
-uv run python main.py
+uv run python construct_data_representations.py
+uv run python train_pipeline.py
 ```
 
-It takes no arguments; the workflow is:
+Both commands take no arguments and load `.env` for data locations and MLflow connection settings. Construction builds the representations listed in `MUSIC_REPR_REPRESENTATIONS`; existing ones are skipped unless `MUSIC_REPR_OVERWRITE=true`. Training loads the completed representation required by its Python config, then runs train, generate, evaluate, and save. A missing representation must be built with the construction command first.
 
-1. edit `.env`;
-2. run `main.py`.
+Training presets live in `train_pipeline.py`. Select a model and name the run in its main block, or call the pipeline from another Python module:
 
-It first builds the representations listed in `MUSIC_REPR_REPRESENTATIONS` (existing ones are skipped unless `MUSIC_REPR_OVERWRITE=true`), always including the one the model trains on, and then runs the training pipeline (train, generate, evaluate, save). Leave `MUSIC_TRAIN_MODEL` empty to only build data.
+```python
+from dataclasses import replace
+from train_pipeline import load_config, train_pipeline
+from trainer.spec import RNN_REMI
+
+baseline = load_config(RNN_REMI)
+short_run = replace(baseline, rnn_epochs=5)
+train_pipeline(short_run, run_name="rnn-remi-short")
+```
+
+Each invocation writes under `<output_dir>/<run-name>/<unique-run-id>/<model>/` so a repeated run name keeps earlier artifacts.
 
 ## Environment Variables
 
-The root runner loads `.env` from the repository root with `python-dotenv`. Variables already set in the real environment take precedence over the file. `MUSIC_REPR_*` variables configure the representation builds and `MUSIC_TRAIN_*` variables configure training.
+Both entry points load `.env` from the repository root with `python-dotenv`. Variables already set in the real environment take precedence over the file. `MUSIC_REPR_*` variables configure representation construction and its artifact location. Training settings are defined in Python.
 
 ### Required variables
 
@@ -289,25 +300,9 @@ MUSIC_REPR_OUTPUT_DIR=/home/you/data/maestro_preprocessed
 
 When S3 storage is enabled this directory becomes the staging and cache root instead of the final destination. See [Storage Backends](#storage-backends).
 
-### Training variables
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `MUSIC_TRAIN_MODEL` | empty | `ngram_remi`, `ngram_note_table` or `rnn_remi`; empty = build representations only |
-| `MUSIC_TRAIN_OUTPUT_DIR` | required with a model | runs are written to `<dir>/<model>/` |
-| `MUSIC_TRAIN_REPRESENTATION` | `remi` | representation to train on (any decodable name, e.g. `bpe`, `tsd`); `ngram_note_table` needs `note_table` |
-| `MUSIC_TRAIN_SEED` | `20260912` | seed for training and generation |
-| `MUSIC_TRAIN_GENERATED_PIECES` | `250` | pieces generated for evaluation |
-| `MUSIC_TRAIN_MAX_ATTEMPTS` | `10` | generation retries per piece |
-| `MUSIC_TRAIN_REMI_MAX_TOKENS` | `2048` | token budget per generated REMI piece |
-| `MUSIC_TRAIN_NOTE_MAX_TOKENS` | `512` | token budget per generated note-table piece |
-| `MUSIC_TRAIN_REMI_N` / `MUSIC_TRAIN_NOTE_N` | `3` / `5` | n-gram orders |
-| `MUSIC_TRAIN_KNN_K` | `5` | nearest neighbours for the note-table n-gram |
-| `MUSIC_TRAIN_RNN_EPOCHS` | `30` | RNN epochs |
-
 ### MLflow tracking
 
-Set `MLFLOW_TRACKING_URI` (and optionally `MLFLOW_EXPERIMENT_NAME`) to log every training run to MLflow; leave it empty to disable tracking. Each run is named `<model>_<representation>_<YYYY-MM-DD_HH-MM-SS>` (e.g. `rnn_remi_2026-11-05_14-03-22`) and records:
+Set `MLFLOW_TRACKING_URI` (and optionally `MLFLOW_EXPERIMENT_NAME`) to log every training run to MLflow; leave it empty to disable tracking. The supplied `run_name` is the MLflow run name. Each run records:
 
 - parameters: every `TrainSettings` field, plus `model` / `representation` tags;
 - losses: `train/epoch_loss` per epoch and `train/batch_loss` every 10 batches (RNN);
@@ -610,7 +605,7 @@ uv run ruff check .
 ```
 
 ```bash
-uv run mypy data_processing tests main.py
+uv run mypy data_processing tests construct_data_representations.py train_pipeline.py
 ```
 
 ## Summary

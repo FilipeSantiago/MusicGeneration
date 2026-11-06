@@ -1,7 +1,7 @@
 """MLflow experiment tracking, enabled when ``MLFLOW_TRACKING_URI`` is set.
 
 ``MLFLOW_TRACKING_URI`` and ``MLFLOW_EXPERIMENT_NAME`` are read by MLflow itself
-from the environment (``.env`` is loaded by ``main.py``). Without a tracking URI
+from the environment (``.env`` is loaded by ``train_pipeline.py``). Without a tracking URI
 every helper here is a no-op, so tests and offline runs need no server.
 """
 
@@ -27,7 +27,7 @@ def enabled() -> bool:
 def run_name(settings: TrainSettings, now: datetime | None = None) -> str:
     """``<model>_<representation>_<date>``, e.g. ``rnn_remi_2026-11-05_14-03-22``.
 
-    The model family is the part of ``MUSIC_TRAIN_MODEL`` before the first
+    The model family is the part of the configured model name before the first
     underscore, so ``ngram_note_table`` on ``note_table`` gives ``ngram_note_table_...``
     rather than repeating the representation.
     """
@@ -37,7 +37,7 @@ def run_name(settings: TrainSettings, now: datetime | None = None) -> str:
 
 
 @contextmanager
-def start_run(settings: TrainSettings) -> Iterator[None]:
+def start_run(settings: TrainSettings, name: str | None = None, run_id: str | None = None) -> Iterator[None]:
     """Open an MLflow run for ``settings`` and log its parameters."""
     if not enabled():
         yield
@@ -47,12 +47,14 @@ def start_run(settings: TrainSettings) -> Iterator[None]:
     experiment = os.environ.get("MLFLOW_EXPERIMENT_NAME", "").strip()
     if experiment:
         mlflow.set_experiment(experiment)
-    name = run_name(settings)
+    name = name or run_name(settings)
     with mlflow.start_run(run_name=name) as active:
         LOGGER.info("MLflow run %s (%s)", name, active.info.run_id)
-        mlflow.set_tags(
-            {"model": settings.model, "representation": settings.representation}
-        )
+        mlflow.set_tags({
+            "model": settings.model,
+            "representation": settings.representation,
+            **({"local_run_id": run_id} if run_id else {}),
+        })
         mlflow.log_params(
             {**asdict(settings), "output_dir": str(settings.output_dir)}
         )
@@ -65,6 +67,13 @@ def _active() -> bool:
     import mlflow
 
     return mlflow.active_run() is not None
+
+
+def log_params(params: Mapping[str, str]) -> None:
+    if _active() and params:
+        import mlflow
+
+        mlflow.log_params(dict(params))
 
 
 def log_metric(key: str, value: float, step: int | None = None) -> None:

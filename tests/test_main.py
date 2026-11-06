@@ -1,123 +1,101 @@
-"""``main.py``: .env-only configuration, building representations, then training."""
-
-from __future__ import annotations
+"""Independent representation construction and training entry points."""
 
 from pathlib import Path
 from types import SimpleNamespace
+from contextlib import nullcontext
+import sys
 
 import pytest
 
-import main
+import construct_data_representations as construction
+import train_pipeline
 from data_processing.music_representations.core.builder import BuildStatus
-
-ENV_KEYS = (
-    "MUSIC_REPR_INPUT_DIR",
-    "MUSIC_REPR_OUTPUT_DIR",
-    "MUSIC_REPR_REPRESENTATIONS",
-    "MUSIC_REPR_OVERWRITE",
-    "MUSIC_REPR_LIMIT",
-    "MUSIC_REPR_CONFIG",
-    "MUSIC_TRAIN_MODEL",
-    "MUSIC_TRAIN_OUTPUT_DIR",
-    "MUSIC_TRAIN_REPRESENTATION",
-)
+from trainer.spec import NGRAM_NOTE_TABLE, RNN_REMI
+from trainer import tracking
 
 
 @pytest.fixture()
 def env(monkeypatch, tmp_path: Path):
-    """A clean environment; the real .env is never read."""
-    for key in ENV_KEYS:
+    for key in (
+        "MUSIC_REPR_INPUT_DIR", "MUSIC_REPR_OUTPUT_DIR", "MUSIC_REPR_REPRESENTATIONS",
+        "MUSIC_REPR_OVERWRITE", "MUSIC_REPR_LIMIT", "MUSIC_REPR_CONFIG",
+    ):
         monkeypatch.delenv(key, raising=False)
-    monkeypatch.setattr(main, "DOTENV_PATH", tmp_path / "missing.env")
+    monkeypatch.setattr(construction, "DOTENV_PATH", tmp_path / "missing.env")
+    monkeypatch.setattr(train_pipeline, "DOTENV_PATH", tmp_path / "missing.env")
     monkeypatch.setenv("MUSIC_REPR_INPUT_DIR", str(tmp_path / "input"))
     monkeypatch.setenv("MUSIC_REPR_OUTPUT_DIR", str(tmp_path / "prepared"))
     return monkeypatch
 
 
-def _fake_builder(monkeypatch, calls: list, status=BuildStatus.SKIPPED):
+def test_construction_only_builds(env):
+    calls = []
+
     class Builder:
         def __init__(self, config):
-            self.config = config
+            pass
 
         def build(self, names, overwrite=False):
-            calls.append(("build", list(names), overwrite))
-            return [
-                SimpleNamespace(
-                    representation=name, status=status, location=None,
-                    message="", error="boom",
-                )
-                for name in names
-            ]
+            calls.append((names, overwrite))
+            return [SimpleNamespace(representation=name, status=BuildStatus.SKIPPED,
+                                    location="", message="", error=None) for name in names]
 
-    monkeypatch.setattr(main, "MusicDatasetBuilder", Builder)
+    env.setenv("MUSIC_REPR_REPRESENTATIONS", "bpe, tsd")
+    env.setenv("MUSIC_REPR_OVERWRITE", "true")
+    env.setattr(construction, "MusicDatasetBuilder", Builder)
+    assert construction.main() == 0
+    assert calls == [(["bpe", "tsd"], True)]
 
 
-def test_dotenv_file_is_loaded_without_overriding_real_env(env, tmp_path: Path):
-    dotenv = tmp_path / ".env"
-    dotenv.write_text(
-        'MUSIC_REPR_REPRESENTATIONS="bpe, tsd"\nMUSIC_REPR_OVERWRITE=yes\n',
-        encoding="utf-8",
+def test_training_does_not_build(env, tmp_path):
+    seen = []
+    env.setattr(train_pipeline, "run", lambda settings, **kwargs: seen.append((settings, kwargs)) or {"jsd": {}})
+    config = train_pipeline.load_config(RNN_REMI)
+    train_pipeline.train_pipeline(config, run_name="rnn-test")
+    assert seen[0][0].representation == "remi"
+    assert seen[0][1]["run_name"] == "rnn-test"
+    assert seen[0][1]["run_id"]
+
+
+def test_presets_and_repeated_names_get_distinct_artifact_paths(env):
+    seen = []
+    env.setattr(train_pipeline, "run", lambda settings, **kwargs: seen.append((settings, kwargs)) or {"jsd": {}})
+    remi = train_pipeline.load_config(RNN_REMI)
+    note = train_pipeline.load_config(NGRAM_NOTE_TABLE)
+    assert (remi.model, remi.representation) == ("rnn_remi", "remi")
+    assert (note.model, note.representation) == ("ngram_note_table", "note_table")
+    train_pipeline.train_pipeline(remi, run_name="same name")
+    train_pipeline.train_pipeline(remi, run_name="same name")
+    assert seen[0][0].output_dir != seen[1][0].output_dir
+    assert all("same-name" in str(settings.output_dir) for settings, _ in seen)
+
+
+def test_failed_construction_reports_failure(env):
+    class Builder:
+        def __init__(self, config):
+            pass
+
+        def build(self, names, overwrite=False):
+            return [SimpleNamespace(representation=name, status=BuildStatus.FAILED,
+                                    location="", message="", error="boom") for name in names]
+
+    env.setattr(construction, "MusicDatasetBuilder", Builder)
+    assert construction.main() == 1
+
+
+def test_explicit_name_is_used_for_mlflow(env):
+    env.setenv("MLFLOW_TRACKING_URI", "http://example.invalid")
+    calls = []
+    fake_mlflow = SimpleNamespace(
+        set_experiment=lambda name: calls.append(("experiment", name)),
+        start_run=lambda run_name: calls.append(("run_name", run_name)) or nullcontext(
+            SimpleNamespace(info=SimpleNamespace(run_id="remote-id"))
+        ),
+        set_tags=lambda tags: calls.append(("tags", tags)),
+        log_params=lambda params: calls.append(("params", params)),
     )
-    env.setattr(main, "DOTENV_PATH", dotenv)
-    env.setenv("MUSIC_REPR_OVERWRITE", "false")  # real env wins
-    calls: list = []
-    _fake_builder(env, calls)
-    assert main.main() == 0
-    assert calls == [("build", ["bpe", "tsd"], False)]
-
-
-def test_build_only_when_no_model_is_configured(env, monkeypatch):
-    calls: list = []
-    _fake_builder(monkeypatch, calls)
-    monkeypatch.setattr(main, "run", lambda _settings: pytest.fail("must not train"))
-    assert main.main() == 0
-    assert calls == [("build", ["all"], False)]
-
-
-def test_builds_the_training_representation_then_trains(env, monkeypatch, tmp_path):
-    env.setenv("MUSIC_REPR_REPRESENTATIONS", "remi")
-    env.setenv("MUSIC_TRAIN_MODEL", "rnn_remi")
-    env.setenv("MUSIC_TRAIN_OUTPUT_DIR", str(tmp_path / "runs"))
-    env.setenv("MUSIC_TRAIN_REPRESENTATION", "bpe")
-    calls: list = []
-    _fake_builder(monkeypatch, calls)
-
-    def fake_run(settings):
-        calls.append(("train", settings.model, settings.representation))
-        return {"jsd": {"pitch": 0.1}}
-
-    monkeypatch.setattr(main, "run", fake_run)
-    assert main.main() == 0
-    assert calls == [("build", ["remi", "bpe"], False), ("train", "rnn_remi", "bpe")]
-
-
-def test_failed_build_stops_before_training(env, monkeypatch, tmp_path):
-    env.setenv("MUSIC_TRAIN_MODEL", "rnn_remi")
-    env.setenv("MUSIC_TRAIN_OUTPUT_DIR", str(tmp_path / "runs"))
-    calls: list = []
-    _fake_builder(monkeypatch, calls, status=BuildStatus.FAILED)
-    monkeypatch.setattr(main, "run", lambda _settings: pytest.fail("must not train"))
-    assert main.main() == 1
-
-
-def test_bad_training_settings_fail_before_building(env, monkeypatch):
-    env.setenv("MUSIC_TRAIN_MODEL", "transformer_9000")
-    calls: list = []
-    _fake_builder(monkeypatch, calls)
-    with pytest.raises(ValueError, match="MUSIC_TRAIN_MODEL"):
-        main.main()
-    assert calls == []
-
-
-def test_missing_directories_are_reported(env):
-    env.delenv("MUSIC_REPR_INPUT_DIR")
-    with pytest.raises(ValueError, match="MUSIC_REPR_INPUT_DIR"):
-        main.main()
-
-
-def test_resolve_representations(env):
-    assert main.resolve_representations("remi") == ["all"]
-    env.setenv("MUSIC_REPR_REPRESENTATIONS", " remi , bpe ,")
-    assert main.resolve_representations() == ["remi", "bpe"]
-    assert main.resolve_representations("remi") == ["remi", "bpe"]
-    assert main.resolve_representations("tsd") == ["remi", "bpe", "tsd"]
+    env.setitem(sys.modules, "mlflow", fake_mlflow)
+    with tracking.start_run(train_pipeline.load_config(RNN_REMI), "named-run", "local-id"):
+        pass
+    assert ("run_name", "named-run") in calls
+    assert any(name == "tags" and value["local_run_id"] == "local-id" for name, value in calls)

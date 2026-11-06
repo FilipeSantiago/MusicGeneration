@@ -30,17 +30,42 @@ class BaseDataloader(ABC):
         self.storage = None
 
     def prepare_dataset(self, representation):
-        output_dir = Path(os.environ.get("MUSIC_REPR_OUTPUT_DIR"))
+        output_dir = Path(os.environ["MUSIC_REPR_OUTPUT_DIR"])
         config = MusicRepresentationConfig(
-            input_dir=Path(os.environ.get("MUSIC_REPR_INPUT_DIR")),
+            input_dir=Path(os.environ["MUSIC_REPR_INPUT_DIR"]),
             output_dir=output_dir,
         )
         storage = build_storage(config)
-        # Kept so callers can decode with the same configuration the tokens were
-        # built with (bin_size, velocity_bin_size, ...) instead of retyping it.
+        if not storage.exists(representation):
+            raise FileNotFoundError(
+                f"Missing completed {representation!r} representation. Run "
+                "construct_data_representations.py first."
+            )
+        self.representation_root = storage.materialize(representation)
+        manifest_path = self.representation_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest["representation"] != representation:
+            raise ValueError(
+                f"Expected {representation!r} manifest at {manifest_path}, "
+                f"found {manifest['representation']!r}"
+            )
+        config = MusicRepresentationConfig.from_dict(dict(manifest["effective_configuration"]))
+        # The current output root locates artifacts; the saved build settings
+        # determine how training interprets those artifacts.
+        config.output_dir = output_dir
+        if not storage.exists(config.canonical_dir_name):
+            raise FileNotFoundError(
+                f"Missing completed {config.canonical_dir_name!r} representation. "
+                "Run construct_data_representations.py first."
+            )
+        self.source_manifest = {
+            "representation": manifest["representation"],
+            "configuration_hash": manifest["configuration_hash"],
+            "source_dataset_fingerprint": manifest["source_dataset_fingerprint"],
+            "representation_schema_version": manifest["representation_schema_version"],
+        }
         self.config = config
         self.storage = storage
-        self.representation_root = storage.materialize(representation)
         
         if representation in ["note_table"]:
             segments_df = pd.read_parquet(self.representation_root / "notes.parquet")

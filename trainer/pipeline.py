@@ -204,7 +204,8 @@ def evaluate(validation, generated_root: Path) -> tuple[dict[str, float], int]:
 
 
 def save(settings: TrainSettings, trained: TrainedModel, generated_root: Path, reference_pieces: int,
-         generated_pieces: int, scores: dict[str, float]) -> dict[str, Any]:
+         generated_pieces: int, scores: dict[str, float], source_manifest: dict[str, str] | None = None,
+         run_name: str | None = None, run_id: str | None = None) -> dict[str, Any]:
     """Save the trained model and completed run metrics."""
     output = settings.output_dir / settings.model
     output.mkdir(parents=True, exist_ok=True)
@@ -221,6 +222,9 @@ def save(settings: TrainSettings, trained: TrainedModel, generated_root: Path, r
         "generated_dataset": str(generated_root),
         "training_epoch_loss": trained.epoch_losses,
         "jsd": scores,
+        "source_representation": source_manifest or {},
+        "run_name": run_name,
+        "run_id": run_id,
     }
     (output / "metrics.json").write_text(
         json.dumps(result, indent=2) + "\n", encoding="utf-8"
@@ -250,12 +254,12 @@ def _run_stage(name, action, *args):
     return result
 
 
-def run(settings: TrainSettings) -> dict[str, Any]:
-    with tracking.start_run(settings):
-        return _run(settings)
+def run(settings: TrainSettings, *, run_name: str | None = None, run_id: str | None = None) -> dict[str, Any]:
+    with tracking.start_run(settings, run_name, run_id):
+        return _run(settings, run_name, run_id)
 
 
-def _run(settings: TrainSettings) -> dict[str, Any]:
+def _run(settings: TrainSettings, run_name: str | None = None, run_id: str | None = None) -> dict[str, Any]:
     random.seed(settings.seed)
     np.random.seed(settings.seed % (2**32))
     torch.manual_seed(settings.seed)
@@ -268,6 +272,8 @@ def _run(settings: TrainSettings) -> dict[str, Any]:
     dataloader, validation, decoder, canonical_root, representation = _run_stage(
         "Prepare dataset", prepare_dataset, settings.representation
     )
+    source_manifest = getattr(dataloader, "source_manifest", {})
+    tracking.log_params({f"source_{key}": value for key, value in source_manifest.items()})
 
     trained = _run_stage("Train", train, settings, dataloader, decoder)
     generated_root = _run_stage(
@@ -294,4 +300,7 @@ def _run(settings: TrainSettings) -> dict[str, Any]:
         validation.pieces.height,
         generated_pieces,
         scores,
+        source_manifest,
+        run_name,
+        run_id,
     )

@@ -1,17 +1,4 @@
-"""Single entry point: build the configured representations, then train.
-
-Everything is configured through ``.env`` (see ``.env.example``):
-
-- ``MUSIC_REPR_*`` -- which representations to build and where
-  (``INPUT_DIR``, ``OUTPUT_DIR``, ``REPRESENTATIONS``, ``OVERWRITE``,
-  ``LIMIT``, ``CONFIG``). Representations that already exist are skipped
-  unless ``MUSIC_REPR_OVERWRITE`` is true.
-- ``MUSIC_TRAIN_*`` -- the model run (``MODEL``, ``REPRESENTATION``,
-  ``OUTPUT_DIR``, ...). Leave ``MUSIC_TRAIN_MODEL`` empty to only build data.
-
-The representation the model trains on is always built, even when it is not
-listed in ``MUSIC_REPR_REPRESENTATIONS``.
-"""
+"""Build the representations selected by ``MUSIC_REPR_*`` in ``.env``."""
 
 from __future__ import annotations
 
@@ -21,30 +8,22 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 from data_processing.music_representations.config import MusicRepresentationConfig
 from data_processing.music_representations.core.builder import BuildStatus
 from data_processing.music_representations.core.dataset_builder import (
     MusicDatasetBuilder,
 )
-from trainer import TrainSettings, run
 
 LOGGER = logging.getLogger(__name__)
 ROOT_DIR = Path(__file__).resolve().parent
 DOTENV_PATH = ROOT_DIR / ".env"
 
 
-def resolve_representations(training_representation: str | None = None) -> list[str]:
-    """``MUSIC_REPR_REPRESENTATIONS`` (default ``all``) plus the training one."""
+def resolve_representations() -> list[str]:
+    """Return ``MUSIC_REPR_REPRESENTATIONS`` (default ``all``)."""
     raw = os.getenv("MUSIC_REPR_REPRESENTATIONS") or "all"
     names = [item.strip() for item in raw.split(",") if item.strip()] or ["all"]
-    if (
-        training_representation
-        and "all" not in names
-        and training_representation not in names
-    ):
-        names.append(training_representation)
     return names
 
 
@@ -63,13 +42,6 @@ def load_config() -> MusicRepresentationConfig:
     if config_path:
         payload.update(json.loads(Path(config_path).read_text(encoding="utf-8")))
     return MusicRepresentationConfig.from_dict(payload)
-
-
-def training_settings() -> TrainSettings | None:
-    """Settings for the training run, or ``None`` when no model is configured."""
-    if not os.getenv("MUSIC_TRAIN_MODEL"):
-        return None
-    return TrainSettings.from_env()
 
 
 def build_representations(config: MusicRepresentationConfig, names: list[str]) -> bool:
@@ -104,19 +76,7 @@ def main() -> int:
         level=getattr(logging, config.log_level.upper(), logging.INFO),
         format="%(levelname)s %(message)s",
     )
-    settings = training_settings()  # validate .env before any long build
-
-    names = resolve_representations(settings.representation if settings else None)
-    if not build_representations(config, names):
-        return 1
-
-    if settings is None:
-        LOGGER.info("MUSIC_TRAIN_MODEL is empty: representations built, no training")
-        return 0
-    with logging_redirect_tqdm():
-        result = run(settings)
-    LOGGER.info("Validation JSD: %s", result["jsd"])
-    return 0
+    return 0 if build_representations(config, resolve_representations()) else 1
 
 
 if __name__ == "__main__":

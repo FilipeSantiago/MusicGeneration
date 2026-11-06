@@ -36,7 +36,7 @@ class NgramRun:
         if settings.representation != self.representation:
             raise ValueError(
                 f"{settings.model} trains on {self.representation!r} but "
-                f"MUSIC_TRAIN_REPRESENTATION is {settings.representation!r}"
+                f"settings specify {settings.representation!r}"
             )
         self.model: Model | None = None
         self.epoch_losses: list[float] = []

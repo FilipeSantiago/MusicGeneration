@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import pickle
 from dataclasses import replace
 from pathlib import Path
@@ -11,6 +12,8 @@ import pytest
 import torch
 
 from data_processing.music_representations.config import MusicRepresentationConfig
+from data_loader import base_dataloader
+from data_loader.raw_dataloader import RawDataloader
 from data_processing.music_representations.helpers.canonical_frames import (
     build_canonical_frames,
 )
@@ -22,17 +25,16 @@ from models.rnn.model import MusicRNN
 from trainer import MODEL_NAMES, TrainSettings, pipeline
 from trainer.factory import RunFactory
 from trainer.runs import NgramRun, RNNRun
+from trainer.spec import MODEL_SPECS
+from train_pipeline import load_config
 
 
 @pytest.mark.parametrize("model", MODEL_NAMES)
-def test_no_argument_settings_select_each_model(monkeypatch, tmp_path: Path, model: str) -> None:
-    monkeypatch.setenv("MUSIC_TRAIN_MODEL", model)
-    monkeypatch.setenv("MUSIC_TRAIN_OUTPUT_DIR", str(tmp_path))
-    monkeypatch.setenv("MUSIC_REPR_INPUT_DIR", str(tmp_path / "input"))
-    monkeypatch.setenv("MUSIC_REPR_OUTPUT_DIR", str(tmp_path / "prepared"))
-    settings = TrainSettings.from_env()
+def test_config_selects_each_model(monkeypatch, model: str) -> None:
+    monkeypatch.setenv("MUSIC_TRAIN_MODEL", "ignored_old_value")
+    settings = load_config(MODEL_SPECS[model])
     assert settings.model == model
-    assert settings.output_dir == tmp_path
+    assert settings.representation == MODEL_SPECS[model].representation
     assert settings.generated_pieces == 250
 
 
@@ -212,6 +214,7 @@ def test_shared_workflow_uses_validation_and_writes_artifacts(
             self.storage = Storage()
             self.config = config
             self.train_df = pd.DataFrame({"piece_id": ["train"]})
+            self.source_manifest = {"configuration_hash": "test-config-hash"}
 
         def prepare_dataset(self, representation):
             self.representation = representation
@@ -260,10 +263,13 @@ def test_shared_workflow_uses_validation_and_writes_artifacts(
         "create",
         lambda selected_settings, _loader, _decoder: Trained(selected_settings.model),
     )
-    result = pipeline.run(settings)
+    result = pipeline.run(settings, run_name="test-baseline", run_id="test-run-id")
     assert result["reference_split"] == "validation"
     assert result["reference_pieces"] == 1
     assert result["generated_pieces"] == 1
+    assert result["source_representation"]["configuration_hash"] == "test-config-hash"
+    assert result["run_name"] == "test-baseline"
+    assert result["run_id"] == "test-run-id"
     assert len(result["jsd"]) == 6
     assert (settings.output_dir / model / "metrics.json").is_file()
     assert (settings.output_dir / model / "generated_canonical" / "manifest.json").is_file()
@@ -354,17 +360,11 @@ def test_failed_validation_does_not_save_checkpoint(
     ) in caplog.text
 
 
-def test_representation_comes_from_settings(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("MUSIC_TRAIN_MODEL", "rnn_remi")
-    monkeypatch.setenv("MUSIC_TRAIN_OUTPUT_DIR", str(tmp_path))
-    monkeypatch.setenv("MUSIC_REPR_INPUT_DIR", str(tmp_path / "input"))
-    monkeypatch.setenv("MUSIC_REPR_OUTPUT_DIR", str(tmp_path / "prepared"))
-    assert TrainSettings.from_env().representation == "remi"  # default
-    monkeypatch.setenv("MUSIC_TRAIN_REPRESENTATION", "BPE")
-    assert TrainSettings.from_env().representation == "bpe"
-    monkeypatch.setenv("MUSIC_TRAIN_REPRESENTATION", "not_a_representation")
-    with pytest.raises(ValueError, match="MUSIC_TRAIN_REPRESENTATION"):
-        TrainSettings.from_env()
+def test_replacing_a_preset_does_not_change_model_input() -> None:
+    settings = replace(load_config(), rnn_epochs=2)
+    assert settings.model == "rnn_remi"
+    assert settings.representation == "remi"
+    assert settings.rnn_epochs == 2
 
 
 def test_prepare_dataset_uses_the_given_representation(
@@ -417,3 +417,36 @@ def test_ngram_rejects_a_conflicting_representation(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="trains on 'note_table'"):
         RunFactory.create(settings, SimpleNamespace(), None)
+
+
+def test_training_loader_uses_saved_representation_config(monkeypatch, tmp_path: Path) -> None:
+    output = tmp_path / "prepared"
+    root = output / "note_table"
+    root.mkdir(parents=True)
+    saved = MusicRepresentationConfig(tmp_path / "input", output)
+    saved.note_table.velocity_bin_size = 7
+    (root / "manifest.json").write_text(json.dumps({
+        "representation": "note_table",
+        "effective_configuration": saved.to_dict(),
+        "configuration_hash": saved.config_hash(),
+        "source_dataset_fingerprint": "fingerprint",
+        "representation_schema_version": "1.0.0",
+    }), encoding="utf-8")
+    pd.DataFrame({"piece_id": ["one"], "segment_id": ["a"],
+                  "maestro_split": ["train"]}).to_parquet(root / "notes.parquet")
+    monkeypatch.setenv("MUSIC_REPR_INPUT_DIR", str(saved.input_dir))
+    monkeypatch.setenv("MUSIC_REPR_OUTPUT_DIR", str(output))
+    storage = SimpleNamespace(exists=lambda _name: True, materialize=lambda _name: root)
+    monkeypatch.setattr(base_dataloader, "build_storage", lambda _config: storage)
+    loader = RawDataloader()
+    loader.prepare_dataset("note_table")
+    assert loader.config.note_table.velocity_bin_size == 7
+    assert loader.source_manifest["configuration_hash"] == saved.config_hash()
+
+
+def test_training_loader_reports_missing_representation(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MUSIC_REPR_INPUT_DIR", str(tmp_path / "input"))
+    monkeypatch.setenv("MUSIC_REPR_OUTPUT_DIR", str(tmp_path / "prepared"))
+    monkeypatch.setattr(base_dataloader, "build_storage", lambda _config: SimpleNamespace(exists=lambda _name: False))
+    with pytest.raises(FileNotFoundError, match="construct_data_representations.py"):
+        RawDataloader().prepare_dataset("remi")
