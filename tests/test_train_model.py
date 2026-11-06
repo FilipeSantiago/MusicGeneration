@@ -419,7 +419,8 @@ def test_ngram_rejects_a_conflicting_representation(tmp_path: Path) -> None:
         RunFactory.create(settings, SimpleNamespace(), None)
 
 
-def test_training_loader_uses_saved_representation_config(monkeypatch, tmp_path: Path) -> None:
+def test_training_loader_uses_saved_representation_config(monkeypatch, tmp_path: Path, caplog) -> None:
+    caplog.set_level(logging.INFO)
     output = tmp_path / "prepared"
     root = output / "note_table"
     root.mkdir(parents=True)
@@ -436,17 +437,24 @@ def test_training_loader_uses_saved_representation_config(monkeypatch, tmp_path:
                   "maestro_split": ["train"]}).to_parquet(root / "notes.parquet")
     monkeypatch.setenv("MUSIC_REPR_INPUT_DIR", str(saved.input_dir))
     monkeypatch.setenv("MUSIC_REPR_OUTPUT_DIR", str(output))
-    storage = SimpleNamespace(exists=lambda _name: True, materialize=lambda _name: root)
+    storage = SimpleNamespace(exists=lambda _name: True, materialize=lambda _name: root,
+                              location=lambda name: str(output / name))
     monkeypatch.setattr(base_dataloader, "build_storage", lambda _config: storage)
     loader = RawDataloader()
     loader.prepare_dataset("note_table")
     assert loader.config.note_table.velocity_bin_size == 7
     assert loader.source_manifest["configuration_hash"] == saved.config_hash()
+    assert "Checking completed note_table representation" in caplog.text
+    assert "Loaded note_table manifest" in caplog.text
+    assert "Checking completed canonical representation" in caplog.text
+    assert "Loaded 1 training rows for note_table" in caplog.text
 
 
 def test_training_loader_reports_missing_representation(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("MUSIC_REPR_INPUT_DIR", str(tmp_path / "input"))
     monkeypatch.setenv("MUSIC_REPR_OUTPUT_DIR", str(tmp_path / "prepared"))
-    monkeypatch.setattr(base_dataloader, "build_storage", lambda _config: SimpleNamespace(exists=lambda _name: False))
+    monkeypatch.setattr(base_dataloader, "build_storage", lambda _config: SimpleNamespace(
+        exists=lambda _name: False, location=lambda name: str(tmp_path / name)
+    ))
     with pytest.raises(FileNotFoundError, match="construct_data_representations.py"):
         RawDataloader().prepare_dataset("remi")

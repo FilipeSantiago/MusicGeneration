@@ -10,8 +10,8 @@ class NNDataloader(BaseDataloader):
     def __init__(self):
         super().__init__()
 
-    def loader(self, batch_size=32, load_music=None, num_workers=2, prefetch_factor=2) -> DataLoader:
-        dataset = MusicDataset(self.train_df, self.representation_root, self.load_music)
+    def loader(self, batch_size=32, num_workers=2, prefetch_factor=2) -> DataLoader:
+        dataset = MusicDataset(self.train_df, self.representation_root)
 
         loader = DataLoader(
             dataset,

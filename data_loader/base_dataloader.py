@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -9,23 +10,13 @@ from torch.utils.data import DataLoader
 from data_processing.music_representations import MusicRepresentationConfig
 from storage import build_storage
 
-NOTE_TABLE_COLUMNS = [
-    "piece_id",
-    "segment_id",
-    "pitch",
-    "velocity",
-    "onset",
-    "duration_bin",
-    "delta_onset_bin",
-]
-
+LOGGER = logging.getLogger(__name__)
 
 class BaseDataloader(ABC):
 
     def __init__(self):
         self.representation_root = None
         self.train_df = None
-        self.note_groups = None
         self.config = None
         self.storage = None
 
@@ -36,14 +27,23 @@ class BaseDataloader(ABC):
             output_dir=output_dir,
         )
         storage = build_storage(config)
+        LOGGER.info(
+            "Checking completed %s representation at %s",
+            representation,
+            storage.location(representation),
+        )
         if not storage.exists(representation):
             raise FileNotFoundError(
                 f"Missing completed {representation!r} representation. Run "
                 "construct_data_representations.py first."
             )
+        LOGGER.info("Found completed %s representation; materializing it", representation)
         self.representation_root = storage.materialize(representation)
+        LOGGER.info("%s representation available at %s", representation, self.representation_root)
         manifest_path = self.representation_root / "manifest.json"
+        LOGGER.info("Reading %s manifest from %s", representation, manifest_path)
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        LOGGER.info("Loaded %s manifest", representation)
         if manifest["representation"] != representation:
             raise ValueError(
                 f"Expected {representation!r} manifest at {manifest_path}, "
@@ -53,11 +53,17 @@ class BaseDataloader(ABC):
         # The current output root locates artifacts; the saved build settings
         # determine how training interprets those artifacts.
         config.output_dir = output_dir
+        LOGGER.info(
+            "Checking completed %s representation at %s",
+            config.canonical_dir_name,
+            storage.location(config.canonical_dir_name),
+        )
         if not storage.exists(config.canonical_dir_name):
             raise FileNotFoundError(
                 f"Missing completed {config.canonical_dir_name!r} representation. "
                 "Run construct_data_representations.py first."
             )
+        LOGGER.info("Found completed %s representation", config.canonical_dir_name)
         self.source_manifest = {
             "representation": manifest["representation"],
             "configuration_hash": manifest["configuration_hash"],
@@ -68,61 +74,19 @@ class BaseDataloader(ABC):
         self.storage = storage
         
         if representation in ["note_table"]:
-            segments_df = pd.read_parquet(self.representation_root / "notes.parquet")
+            table_path = self.representation_root / "notes.parquet"
         else:
-            segments_df = pd.read_parquet(self.representation_root / "segments.parquet")
+            table_path = self.representation_root / "segments.parquet"
+        LOGGER.info("Loading %s training table from %s", representation, table_path)
+        segments_df = pd.read_parquet(table_path)
         self.train_df = segments_df[segments_df["maestro_split"] == "train"]
-
         if representation in ["note_table"]:
             self.train_df = (
                 self.train_df[["piece_id", "segment_id"]]
                 .drop_duplicates()
                 .reset_index(drop=True)
             )
-
-    def load_music(self, row, representation_root):
-        token_path = representation_root / row["token_file"]
-        payload = json.loads(token_path.read_text(encoding="utf-8"))
-
-        return {
-            "piece_id": row["piece_id"],
-            "segment_id": row["segment_id"],
-            "tokens": payload["ids"],
-        }
-
-    def load_note_table_music(self, row, representation_root):
-        segment_id = row["segment_id"]
-        grouped = self._note_table_groups(representation_root)
-
-        if pd.isna(segment_id):
-            notes = grouped["piece_id"].get_group(row["piece_id"])
-        else:
-            notes = grouped["segment_id"].get_group(segment_id)
-
-        notes = notes.sort_values("onset")
-        notes["velocity_bin"] = notes["velocity"] // self.config.note_table.velocity_bin_size
-
-        return {
-            "piece_id": row["piece_id"],
-            "segment_id": segment_id,
-            "pitch": notes["pitch"].tolist(),
-            "velocity": notes["velocity"].tolist(),
-            "velocity_bin": notes["velocity_bin"].tolist(),
-            "onset": notes["onset"].tolist(),
-            "duration_bin": notes["duration_bin"].tolist(),
-            "delta_onset_bin": notes["delta_onset_bin"].tolist(),
-        }
-
-    def _note_table_groups(self, representation_root):
-        if self.note_groups is None:
-            notes_df = pd.read_parquet(
-                representation_root / "notes.parquet", columns=NOTE_TABLE_COLUMNS
-            )
-            self.note_groups = {
-                "piece_id": notes_df.groupby("piece_id", sort=False),
-                "segment_id": notes_df.groupby("segment_id", sort=False),
-            }
-        return self.note_groups
+        LOGGER.info("Loaded %s training rows for %s", len(self.train_df), representation)
 
     @abstractmethod
     def loader(self, batch_size) -> DataLoader:

@@ -42,12 +42,7 @@ class NgramRun:
         self.epoch_losses: list[float] = []
 
     def train(self) -> None:
-        load_fn = (
-            self.dataloader.load_music
-            if self.representation == "remi"
-            else self.dataloader.load_note_table_music
-        )
-        loader = self.dataloader.loader(load_music=load_fn)
+        loader = self.dataloader.loader(representation=self.representation)
         neighbors = None
         if self.representation == "note_table":
             LOGGER.info("Counting note-table tokens for nearest neighbors")

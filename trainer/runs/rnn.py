@@ -60,7 +60,7 @@ class RNNRun:
         model = MusicRNN(vocab_size).to(self.device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         criterion = nn.CrossEntropyLoss()
-        loader = self.dataloader.loader(load_music=self.dataloader.load_music)
+        loader = self.dataloader.loader(representation="remi")
         LOGGER.info(
             "RNN training on %s: vocab=%s, epochs=%s, training songs=%s",
             self.device,
@@ -86,36 +86,36 @@ class RNNRun:
             loss_sum = 0.0
             batch_count = 0
             progress = tqdm(
-                loader,
-                total=len(loader) if hasattr(loader, "__len__") else None,
                 desc=f"RNN epoch {epoch + 1}/{self.settings.rnn_epochs}",
-                unit="song batch",
-                disable=None,
+                unit="batch",
+                disable=False,
+                mininterval=0.5,
             )
-            for batch in self._iter_training_batches(progress):
-                x = torch.tensor(
-                    [sample[0] for sample in batch], dtype=torch.long, device=self.device
-                )
-                y = torch.tensor(
-                    [sample[1] for sample in batch], dtype=torch.long, device=self.device
-                )
-                optimizer.zero_grad()
-                logits, _ = model(x)
-                loss = criterion(logits.reshape(-1, vocab_size), y.reshape(-1))
-                loss.backward()
-                optimizer.step()
-                batch_loss = loss.item()
-                loss_sum += batch_loss
-                batch_count += 1
-                global_step += 1
-                if global_step % 10 == 0:
-                    tracking.log_metric("train/batch_loss", batch_loss, step=global_step)
-                if batch_count % 10 == 0:
-                    progress.set_postfix(
-                        batch=batch_count,
-                        loss=f"{loss.item():.4f}",
-                        mean=f"{loss_sum / batch_count:.4f}",
+            with progress:
+                for batch in self._iter_training_batches(loader):
+                    x = torch.tensor(
+                        [sample[0] for sample in batch], dtype=torch.long, device=self.device
                     )
+                    y = torch.tensor(
+                        [sample[1] for sample in batch], dtype=torch.long, device=self.device
+                    )
+                    optimizer.zero_grad()
+                    logits, _ = model(x)
+                    loss = criterion(logits.reshape(-1, vocab_size), y.reshape(-1))
+                    loss.backward()
+                    optimizer.step()
+                    batch_loss = loss.item()
+                    loss_sum += batch_loss
+                    batch_count += 1
+                    global_step += 1
+                    if global_step % 10 == 0:
+                        tracking.log_metric("train/batch_loss", batch_loss, step=global_step)
+                    progress.set_postfix(
+                        loss=f"{batch_loss:.4f}",
+                        mean=f"{loss_sum / batch_count:.4f}",
+                        refresh=False,
+                    )
+                    progress.update(1)
             if not batch_count:
                 raise ValueError("No 256-token REMI training windows were available")
             mean_loss = loss_sum / batch_count

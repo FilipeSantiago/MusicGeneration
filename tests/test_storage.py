@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import sys
 import threading
@@ -474,6 +475,32 @@ def test_build_storage_selects_s3_and_derives_the_prefix(tmp_path: Path) -> None
     assert storage.bucket == "my-bucket"
     assert storage.prefix == "maestro-v3.0.0_processed"
     assert storage.keep_local is False
+
+
+def test_storage_factory_logs_client_setup_without_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    caplog.set_level(logging.INFO)
+    client = FakeS3Client()
+
+    class FakeSession:
+        def __init__(self, **_kwargs):
+            pass
+
+        def client(self, _service, **_kwargs):
+            return client
+
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(session=SimpleNamespace(Session=FakeSession)))
+    storage = build_storage(_config(tmp_path), env={
+        "AWS_BUCKET": "my-bucket",
+        "AWS_ACCESS_KEY": "private-access-value",
+        "AWS_SECRET_ACCESS_KEY": "private-secret-value",
+    })
+    assert isinstance(storage, S3Storage)
+    assert "Creating S3 client" in caplog.text
+    assert "S3 client ready" in caplog.text
+    assert "private-access-value" not in caplog.text
+    assert "private-secret-value" not in caplog.text
 
 
 def test_build_storage_honours_the_optional_variables(tmp_path: Path) -> None:

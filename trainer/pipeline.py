@@ -112,8 +112,12 @@ def prepare_dataset(representation: str):
     dataloader.prepare_dataset(representation=representation)
     if dataloader.train_df.empty:
         raise ValueError(f"{representation} has no training rows")
+    LOGGER.info("Materializing %s validation data", dataloader.config.canonical_dir_name)
     canonical_root = dataloader.storage.materialize(dataloader.config.canonical_dir_name)
+    LOGGER.info("Validation data available at %s", canonical_root)
+    LOGGER.info("Loading canonical validation dataset")
     canonical = load_canonical_dataset(canonical_root)
+    LOGGER.info("Loaded canonical validation dataset")
     validation_ids = (
         canonical.pieces.filter(pl.col("maestro_split") == "validation")
         .get_column("piece_id")

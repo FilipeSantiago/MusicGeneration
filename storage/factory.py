@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from typing import Any
@@ -11,6 +12,7 @@ from .local_storage import LocalStorage
 from .s3_storage import S3Storage
 
 TRUTHY = {"1", "true", "yes", "on"}
+LOGGER = logging.getLogger(__name__)
 
 
 def build_storage(
@@ -31,10 +33,15 @@ def build_storage(
     cache = LocalStorage(config.output_dir, **leasing)
     bucket = _clean(env, "AWS_BUCKET")
     if not bucket:
+        LOGGER.info("Using local representation storage at %s", config.output_dir)
         return cache
+    prefix = _clean(env, "MUSIC_REPR_S3_PREFIX") or config.output_dir.name
+    LOGGER.info(
+        "Using S3 representation storage s3://%s/%s", bucket, prefix.strip("/")
+    )
     return S3Storage(
         bucket=bucket,
-        prefix=_clean(env, "MUSIC_REPR_S3_PREFIX") or config.output_dir.name,
+        prefix=prefix,
         cache=cache,
         client=client if client is not None else _build_client(env),
         keep_local=_flag(env, "MUSIC_REPR_KEEP_LOCAL"),
@@ -65,6 +72,7 @@ def _lease_ttl(env: Mapping[str, str]) -> float:
 
 
 def _build_client(env: Mapping[str, str]) -> Any:
+    LOGGER.info("Creating S3 client")
     import boto3
 
     access_key = _clean(env, "AWS_ACCESS_KEY")
@@ -77,4 +85,6 @@ def _build_client(env: Mapping[str, str]) -> Any:
         aws_secret_access_key=secret_key or None,
         region_name=_clean(env, "AWS_REGION") or None,
     )
-    return session.client("s3", endpoint_url=_clean(env, "AWS_ENDPOINT_URL") or None)
+    client = session.client("s3", endpoint_url=_clean(env, "AWS_ENDPOINT_URL") or None)
+    LOGGER.info("S3 client ready")
+    return client
